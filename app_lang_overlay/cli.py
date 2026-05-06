@@ -16,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     backend.add_argument("--port", type=int, default=8765)
     backend.add_argument("--interval-ms", type=int, default=900)
     backend.add_argument("--input-mode", default="ocr")
-    backend.add_argument("--ocr-lang", default="eng")
+    backend.add_argument("--ocr-lang", default="en")
     backend.add_argument("--dedupe-window-ms", type=int, default=1200)
 
     return parser
@@ -27,8 +27,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "overlay-backend":
-        if args.input_mode not in ("fake", "ocr"):
-            raise SystemExit("--input-mode must be one of: fake, ocr")
+        if args.input_mode not in ("fake", "ocr", "accessibility"):
+            raise SystemExit("--input-mode must be one of: fake, ocr, accessibility")
         asyncio.run(
             run_overlay_backend(
                 host=args.host,

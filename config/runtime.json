@@ -8,5 +8,8 @@
     "n_batch": 1024,
     "max_tokens": 1024,
     "chat_format": null
+  },
+  "overlay": {
+    "input_mode": "accessibility"
   }
 }

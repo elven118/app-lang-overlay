@@ -1,43 +1,46 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from typing import AsyncIterator
+
+import mss
+from PIL import Image
+import numpy as np
+import cv2
+from paddleocr import PaddleOCR 
 
 from .config import get_ocr_lang, profile_path, try_load_capture_region
 from .textproc import confidence_for_text, dedupe_key, normalize_text
 
 
 async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterator[dict]:
-    try:
-        import mss
-        import pytesseract
-        from PIL import Image, ImageOps
-    except ImportError as exc:
-        raise RuntimeError("OCR mode requires dependencies: mss, pillow, pytesseract") from exc
-
     region: dict | None = None
     interval_s = max(interval_ms, 100) / 1000
     region_log_cooldown_s = 2.0
     last_region_log_at = 0.0
     active_ocr_lang = ocr_lang
+    last_debug_at = 0.0
 
-    tesseract_cmd = os.environ.get("TESSERACT_CMD", "/opt/homebrew/bin/tesseract").strip()
-    if tesseract_cmd:
-        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+    ocr_instances: dict[str, PaddleOCR] = {}
 
-    try:
-        tesseract_version = str(pytesseract.get_tesseract_version())
-        print(
-            f"[overlay-backend] tesseract={tesseract_version} "
-            f"cmd={pytesseract.pytesseract.tesseract_cmd}"
+    def get_ocr_for_lang(lang: str) -> PaddleOCR:
+        existing = ocr_instances.get(lang)
+        if existing is not None:
+            return existing
+        print(f"[overlay-backend] init PaddleOCR lang={lang}")
+        inst = PaddleOCR(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            lang=lang,
+
+            det_db_box_thresh=0.6,
+            det_db_unclip_ratio=1.4,
+            rec_batch_num=1
         )
-    except Exception as exc:
-        raise RuntimeError(
-            "Tesseract binary not found. Install Tesseract OCR and ensure it's in PATH, "
-            "or set TESSERACT_CMD=/full/path/to/tesseract."
-        ) from exc
+        ocr_instances[lang] = inst
+        return inst
 
     with mss.MSS() as sct:
         while True:
@@ -59,13 +62,20 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
                 active_ocr_lang = current_lang
                 print(f"[overlay-backend] OCR language switched to: {active_ocr_lang}")
 
+            ocr = get_ocr_for_lang(active_ocr_lang)
             shot = sct.grab(region)
             image = Image.frombytes("RGB", shot.size, shot.rgb)
-            image = ImageOps.autocontrast(ImageOps.grayscale(image))
-            raw = pytesseract.image_to_string(
-                image, lang=active_ocr_lang, config="--oem 3 --psm 6"
-            )
-            text = normalize_text(raw)
+            image_np = np.array(image)
+            img_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+            raw = ocr.ocr(img_bgr)
+            texts = []
+            if raw and isinstance(raw, list) and len(raw) > 0:
+                res = raw[0]
+                if 'rec_texts' in res:
+                    for text_content, score in zip(res['rec_texts'], res['rec_scores']):
+                        if score > 0.6 and len(text_content.strip()) > 0:
+                            texts.append(text_content.strip())
+            text = "\n".join(texts)
             now = time.time()
             yield {
                 "type": "subtitle",
@@ -77,6 +87,6 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
                 "lang_dst": "en",
                 "confidence": confidence_for_text(text),
                 "dedupe_key": dedupe_key(text),
-                "hide_after_ms": 2200,
+                "hide_after_ms": 5000,
             }
             await asyncio.sleep(interval_s)

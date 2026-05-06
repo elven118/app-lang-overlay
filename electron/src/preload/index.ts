@@ -1,21 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-
-type OverlaySettings = {
-  anchor: 'top' | 'bottom';
-  offsetX: number;
-  offsetY: number;
-  maxWidth: number;
-  fontSize: number;
-  lineGap: number;
-  textColor: string;
-  translateColor: string;
-  outlineColor: string;
-  background: string;
-  autoHideMs: number;
-  dedupeWindowMs: number;
-  clickthrough: boolean;
-  ocrLang: string;
-};
+import type { OverlaySettings } from '../shared/types';
 
 type CaptureRegion = {
   left: number;
@@ -28,11 +12,15 @@ contextBridge.exposeInMainWorld('overlayApi', {
   getSettings: (): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:get-settings'),
   saveSettings: (payload: OverlaySettings): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:save-settings', payload),
   setClickthrough: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('overlay:set-clickthrough', enabled),
+  copyText: (text: string): Promise<boolean> => ipcRenderer.invoke('overlay:copy-text', text),
   getGameId: (): Promise<string> => ipcRenderer.invoke('overlay:get-game-id'),
   pickRegion: (): Promise<{ status: string; game_id?: string; capture_region?: CaptureRegion; profile_path?: string }> =>
     ipcRenderer.invoke('overlay:pick-region'),
   onTogglePanel: (callback: () => void) => {
     ipcRenderer.on('overlay:toggle-panel', () => callback());
+  },
+  onCopyCurrent: (callback: () => void) => {
+    ipcRenderer.on('overlay:copy-current', () => callback());
   }
 });
 

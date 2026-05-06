@@ -63,7 +63,7 @@ def try_load_capture_region(game: str) -> dict | None:
     }
 
 
-def get_ocr_lang(game: str, default_lang: str = "eng") -> str:
+def get_ocr_lang(game: str, default_lang: str = "en") -> str:
     p = profile_path(game)
     if p.exists():
         try:

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   app,
   BrowserWindow,
+  clipboard,
   Display,
   globalShortcut,
   ipcMain,
@@ -10,28 +11,12 @@ import {
   MenuItemConstructorOptions,
   screen,
 } from "electron";
+import type { OverlaySettings } from "./shared/types";
 
 interface SelectionWindow extends BrowserWindow {
   display?: Display;
   displayIndex?: number;
 }
-
-type OverlaySettings = {
-  anchor: "top" | "bottom";
-  offsetX: number;
-  offsetY: number;
-  maxWidth: number;
-  fontSize: number;
-  lineGap: number;
-  textColor: string;
-  translateColor: string;
-  outlineColor: string;
-  background: string;
-  autoHideMs: number;
-  dedupeWindowMs: number;
-  clickthrough: boolean;
-  ocrLang: string;
-};
 
 type CaptureRegion = {
   left: number;
@@ -41,20 +26,19 @@ type CaptureRegion = {
 };
 
 const DEFAULT_SETTINGS: OverlaySettings = {
-  anchor: "bottom",
   offsetX: 0,
-  offsetY: 120,
-  maxWidth: 1000,
+  offsetY: 0,
+  width: 600,
   fontSize: 12,
   lineGap: 10,
   textColor: "#ffffff",
   translateColor: "#ffd166",
   outlineColor: "#000000",
   background: "rgba(0,0,0,0.35)",
-  autoHideMs: 2200,
+  autoHideMs: 5000,
   dedupeWindowMs: 1200,
   clickthrough: true,
-  ocrLang: "eng",
+  ocrLang: "en",
 };
 
 const gameId = process.env.GAME_ID || "demo";
@@ -144,14 +128,13 @@ function saveOverlaySettings(game: string, settings: OverlaySettings): OverlaySe
   const normalized: OverlaySettings = {
     ...DEFAULT_SETTINGS,
     ...settings,
-    anchor: settings.anchor === "top" ? "top" : "bottom",
-    maxWidth: Math.max(280, Math.round(settings.maxWidth)),
-    fontSize: Math.max(14, Math.round(settings.fontSize)),
+    width: Math.round(settings.width),
+    fontSize: Math.max(0, Math.round(settings.fontSize)),
     lineGap: Math.max(0, Math.round(settings.lineGap)),
     autoHideMs: Math.max(300, Math.round(settings.autoHideMs)),
     dedupeWindowMs: Math.max(0, Math.round(settings.dedupeWindowMs)),
     clickthrough: Boolean(settings.clickthrough),
-    ocrLang: String(settings.ocrLang || "eng"),
+    ocrLang: String(settings.ocrLang || "en"),
   };
 
   const profile = loadProfile(game);
@@ -174,15 +157,14 @@ function saveCaptureRegion(game: string, region: CaptureRegion): void {
   const captureCenterX = region.left - displayBounds.x + region.width / 2;
   const displayCenterX = displayBounds.width / 2;
   const offsetX = Math.round(captureCenterX - displayCenterX);
-  const offsetY = Math.max(0, Math.round(region.top - displayBounds.y));
-  const maxWidth = Math.max(280, Math.round(region.width));
+  const offsetY = Math.round(region.top - displayBounds.y + region.height) + 5;
+  const width = Math.round(region.width);
   profile.overlay_settings = {
     ...DEFAULT_SETTINGS,
     ...existing,
-    anchor: "top",
     offsetX,
     offsetY,
-    maxWidth,
+    width,
   };
 
   saveProfile(game, profile);
@@ -340,6 +322,12 @@ ipcMain.handle("overlay:set-clickthrough", (_event, enabled: boolean) => {
 });
 
 ipcMain.handle("overlay:get-game-id", () => gameId);
+ipcMain.handle("overlay:copy-text", (_event, text: string) => {
+  const safe = String(text || "");
+  if (!safe.trim()) return false;
+  clipboard.writeText(safe);
+  return true;
+});
 
 ipcMain.handle("overlay:pick-region", async () => {
   await openRegionPickerWindows();
@@ -409,6 +397,11 @@ app.whenReady().then(() => {
   globalShortcut.register("CommandOrControl+Shift+O", () => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay:toggle-panel");
+    }
+  });
+  globalShortcut.register("CommandOrControl+Shift+C", () => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("overlay:copy-current");
     }
   });
 

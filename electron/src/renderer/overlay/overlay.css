@@ -7,7 +7,7 @@
   --bg: rgba(0,0,0,0.35);
   --max-width: 1000px;
   --offset-x: 0px;
-  --offset-y: 120px;
+  --offset-y: 0px;
 }
 
 html, body {
@@ -27,8 +27,7 @@ html, body {
   pointer-events: none;
 }
 
-.anchor-bottom { bottom: var(--offset-y); }
-.anchor-top { top: var(--offset-y); }
+.anchor { top: var(--offset-y); }
 
 #subtitle-box {
   background: var(--bg);

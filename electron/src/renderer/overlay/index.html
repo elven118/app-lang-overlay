@@ -1,5 +1,6 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -8,8 +9,9 @@
   <title>App Lang Overlay</title>
   <link rel="stylesheet" href="overlay.css" />
 </head>
+
 <body>
-  <div id="root" class="anchor-bottom">
+  <div id="root" class="anchor">
     <div id="subtitle-box" class="hidden">
       <div id="source" class="line source"></div>
       <div id="translated" class="line translated"></div>
@@ -17,16 +19,10 @@
   </div>
   <div id="settings-panel" class="hidden">
     <div class="panel-title">Overlay Settings</div>
-    <label>Anchor
-      <select id="setting-anchor">
-        <option value="bottom">bottom</option>
-        <option value="top">top</option>
-      </select>
-    </label>
     <label>Offset X <input id="setting-offset-x" type="number" step="1" /></label>
     <label>Offset Y <input id="setting-offset-y" type="number" step="1" /></label>
-    <label>Max Width <input id="setting-max-width" type="number" step="10" min="280" /></label>
-    <label>Font Size <input id="setting-font-size" type="number" step="1" min="14" /></label>
+    <label>Width <input id="setting-width" type="number" step="1" min="0" /></label>
+    <label>Font Size <input id="setting-font-size" type="number" step="1" min="0" /></label>
     <label>Source Text Color <input id="setting-text-color" type="color" /></label>
     <label>Translated Text Color <input id="setting-translate-color" type="color" /></label>
     <label>Background Color <input id="setting-background-color" type="color" /></label>
@@ -35,15 +31,16 @@
     <label>Dedupe (ms) <input id="setting-dedupe" type="number" step="100" min="0" /></label>
     <label>OCR Input Language
       <select id="setting-ocr-lang">
-        <option value="eng">English (eng)</option>
-        <option value="jpn">Japanese (jpn)</option>
-        <option value="chi_sim">Chinese Simplified (chi_sim)</option>
-        <option value="chi_tra">Chinese Traditional (chi_tra)</option>
-        <option value="kor">Korean (kor)</option>
+        <option value="en">English (en)</option>
+        <option value="japan">Japanese (japan)</option>
+        <option value="ch">Chinese Simplified (ch)</option>
+        <option value="chinese_cht">Chinese Traditional (chinese_cht)</option>
+        <option value="korean">Korean (korean)</option>
       </select>
     </label>
     <label class="checkline"><input id="setting-clickthrough" type="checkbox" /> Clickthrough</label>
   </div>
   <script src="./overlay.js"></script>
 </body>
+
 </html>

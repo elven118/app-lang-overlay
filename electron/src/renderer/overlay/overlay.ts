@@ -1,20 +1,3 @@
-type OverlaySettings = {
-  anchor: 'top' | 'bottom';
-  offsetX: number;
-  offsetY: number;
-  maxWidth: number;
-  fontSize: number;
-  lineGap: number;
-  textColor: string;
-  translateColor: string;
-  outlineColor: string;
-  background: string;
-  autoHideMs: number;
-  dedupeWindowMs: number;
-  clickthrough: boolean;
-  ocrLang: string;
-};
-
 type SubtitleEvent = {
   type: 'subtitle';
   profile: string;
@@ -43,16 +26,17 @@ type HealthEvent = {
 
 type OverlayEvent = SubtitleEvent | ClearEvent | HealthEvent;
 
+import type { OverlaySettings } from '../../shared/types';
+
 const sourceEl = document.getElementById('source') as HTMLDivElement;
 const translatedEl = document.getElementById('translated') as HTMLDivElement;
 const box = document.getElementById('subtitle-box') as HTMLDivElement;
 const root = document.getElementById('root') as HTMLDivElement;
 const panel = document.getElementById('settings-panel') as HTMLDivElement;
 
-const anchorSelect = document.getElementById('setting-anchor') as HTMLSelectElement;
 const offsetXInput = document.getElementById('setting-offset-x') as HTMLInputElement;
 const offsetYInput = document.getElementById('setting-offset-y') as HTMLInputElement;
-const maxWidthInput = document.getElementById('setting-max-width') as HTMLInputElement;
+const widthInput = document.getElementById('setting-width') as HTMLInputElement;
 const fontSizeInput = document.getElementById('setting-font-size') as HTMLInputElement;
 const textColorInput = document.getElementById('setting-text-color') as HTMLInputElement;
 const translateColorInput = document.getElementById('setting-translate-color') as HTMLInputElement;
@@ -68,6 +52,8 @@ let hideTimer: ReturnType<typeof setTimeout> | undefined;
 let settings: OverlaySettings;
 let gameId = 'demo';
 let panelVisible = false;
+let latestSourceText = '';
+let latestTranslatedText = '';
 const dedupeSeen = new Map<string, number>();
 
 function setStyle(nextSettings: OverlaySettings): void {
@@ -77,20 +63,32 @@ function setStyle(nextSettings: OverlaySettings): void {
   document.documentElement.style.setProperty('--translate-color', nextSettings.translateColor);
   document.documentElement.style.setProperty('--outline-color', nextSettings.outlineColor);
   document.documentElement.style.setProperty('--bg', nextSettings.background);
-  document.documentElement.style.setProperty('--max-width', `${nextSettings.maxWidth}px`);
+  document.documentElement.style.setProperty('--max-width', `${nextSettings.width}px`);
   document.documentElement.style.setProperty('--offset-x', `${nextSettings.offsetX}px`);
   document.documentElement.style.setProperty('--offset-y', `${nextSettings.offsetY}px`);
-  root.classList.remove('anchor-top', 'anchor-bottom');
-  root.classList.add(nextSettings.anchor === 'top' ? 'anchor-top' : 'anchor-bottom');
 }
 
 function show(sourceText: string, translatedText: string | null, hideAfterMs: number | undefined): void {
-  sourceEl.textContent = sourceText;
+  latestSourceText = sourceText || '';
+  latestTranslatedText = translatedText || '';
+  if (sourceEl) sourceEl.textContent = sourceText;
   translatedEl.textContent = translatedText || '';
   box.classList.remove('hidden');
   box.classList.add('visible');
   if (hideTimer) clearTimeout(hideTimer);
   hideTimer = setTimeout(() => hide(), hideAfterMs || settings.autoHideMs);
+}
+
+async function copyCurrentText(): Promise<void> {
+  const text = (latestTranslatedText || latestSourceText || '').trim();
+  if (!text) {
+    show('Nothing to copy', '', 900);
+    return;
+  }
+  const ok = await window.overlayApi.copyText(text);
+  if (ok) {
+    show('Copied to clipboard', text, 1200);
+  }
 }
 
 function hide(): void {
@@ -147,10 +145,9 @@ function composeBackground(): string {
 }
 
 function syncPanelFromSettings(): void {
-  anchorSelect.value = settings.anchor;
   offsetXInput.value = String(settings.offsetX);
   offsetYInput.value = String(settings.offsetY);
-  maxWidthInput.value = String(settings.maxWidth);
+  widthInput.value = String(settings.width);
   fontSizeInput.value = String(settings.fontSize);
   textColorInput.value = settings.textColor.startsWith('#') ? settings.textColor : '#ffffff';
   translateColorInput.value = settings.translateColor.startsWith('#') ? settings.translateColor : '#ffd166';
@@ -159,24 +156,23 @@ function syncPanelFromSettings(): void {
   backgroundAlphaInput.value = String(bg.alphaPercent);
   autoHideInput.value = String(settings.autoHideMs);
   dedupeInput.value = String(settings.dedupeWindowMs);
-  ocrLangInput.value = settings.ocrLang || 'eng';
+  ocrLangInput.value = settings.ocrLang || 'en';
   clickthroughInput.checked = settings.clickthrough;
 }
 
 function parsePanelSettings(): OverlaySettings {
   return {
     ...settings,
-    anchor: anchorSelect.value === 'top' ? 'top' : 'bottom',
     offsetX: Number(offsetXInput.value || settings.offsetX),
     offsetY: Number(offsetYInput.value || settings.offsetY),
-    maxWidth: Number(maxWidthInput.value || settings.maxWidth),
+    width: Number(widthInput.value || settings.width),
     fontSize: Number(fontSizeInput.value || settings.fontSize),
     textColor: textColorInput.value || settings.textColor,
     translateColor: translateColorInput.value || settings.translateColor,
     background: composeBackground(),
     autoHideMs: Number(autoHideInput.value || settings.autoHideMs),
     dedupeWindowMs: Number(dedupeInput.value || settings.dedupeWindowMs),
-    ocrLang: ocrLangInput.value || settings.ocrLang || 'eng',
+    ocrLang: ocrLangInput.value || settings.ocrLang || 'en',
     clickthrough: clickthroughInput.checked,
   };
 }
@@ -241,10 +237,9 @@ function installPanelEvents(): void {
     void persistFromPanel();
   };
 
-  anchorSelect.addEventListener('change', persist);
   offsetXInput.addEventListener('change', persist);
   offsetYInput.addEventListener('change', persist);
-  maxWidthInput.addEventListener('change', persist);
+  widthInput.addEventListener('change', persist);
   fontSizeInput.addEventListener('change', persist);
   textColorInput.addEventListener('input', persist);
   translateColorInput.addEventListener('input', persist);
@@ -258,6 +253,9 @@ function installPanelEvents(): void {
   window.overlayApi.onTogglePanel(() => {
     void togglePanel(!panelVisible);
   });
+  window.overlayApi.onCopyCurrent(() => {
+    void copyCurrentText();
+  });
 
   window.addEventListener('keydown', (event) => {
     const isMac = navigator.platform.toUpperCase().includes('MAC');
@@ -270,6 +268,11 @@ function installPanelEvents(): void {
       event.preventDefault();
       void togglePanel(false);
     }
+    const copyHotkey = event.shiftKey && event.key.toLowerCase() === 'c' && (isMac ? event.metaKey : event.ctrlKey);
+    if (copyHotkey) {
+      event.preventDefault();
+      void copyCurrentText();
+    }
   });
 }
 
@@ -278,6 +281,6 @@ function installPanelEvents(): void {
   settings = await window.overlayApi.getSettings();
   setStyle(settings);
   installPanelEvents();
-  show('Overlay ready', `Profile: ${gameId}`, 2200);
+  show('Overlay ready', `Profile: ${gameId}`, 5000);
   connect();
 })();

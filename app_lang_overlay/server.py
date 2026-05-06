@@ -8,6 +8,7 @@ from typing import Iterable
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
+from .ax_source import ax_stream
 from .llm import LocalTranslator
 from .ocr import ocr_stream
 from .textproc import dedupe_key, normalize_for_compare
@@ -37,7 +38,7 @@ def fake_stream(game: str) -> Iterable[dict]:
             "lang_dst": "en",
             "confidence": 0.95,
             "dedupe_key": f"{source}:{translated}",
-            "hide_after_ms": 2200,
+            "hide_after_ms": 5000,
         }
 
 
@@ -52,7 +53,7 @@ async def run_overlay_backend(
 ) -> None:
     clients: set = set()
     stop = asyncio.Event()
-    translator = LocalTranslator(target_lang="en")
+    translator = LocalTranslator(target_lang="繁體中文")
 
     async def handler(ws):
         clients.add(ws)
@@ -92,12 +93,17 @@ async def run_overlay_backend(
                 await asyncio.sleep(max(interval_ms, 100) / 1000)
             return
 
-        if input_mode != "ocr":
-            raise RuntimeError("--input-mode must be one of: fake, ocr")
+        if input_mode not in ("ocr", "accessibility"):
+            raise RuntimeError("--input-mode must be one of: fake, ocr, accessibility")
 
         while not stop.is_set():
             try:
-                async for event in ocr_stream(game, interval_ms, ocr_lang):
+                stream = (
+                    ocr_stream(game, interval_ms, ocr_lang)
+                    if input_mode == "ocr"
+                    else ax_stream(game, interval_ms)
+                )
+                async for event in stream:
                     if stop.is_set():
                         return
 
@@ -117,7 +123,7 @@ async def run_overlay_backend(
                                     "reason": "empty_ocr",
                                 }
                             )
-                        if now - last_empty_notice_at >= 5.0:
+                        if input_mode == "ocr" and now - last_empty_notice_at >= 5.0:
                             last_empty_notice_at = now
                             await publish(
                                 {
@@ -142,13 +148,10 @@ async def run_overlay_backend(
                     if same_text and in_window:
                         continue
 
-                    if same_text and dedupe_window_ms > 0:
-                        continue
-
                     last_emitted_compare = compare_text
                     last_emitted_at = now
                     translated = await translator.translate(text)
-                    event["source_text"] = ""
+                    event["source_text"] = text
                     event["translated_text"] = translated
                     event["dedupe_key"] = dedupe_key(translated or text)
                     await publish(event)

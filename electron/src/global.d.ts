@@ -1,56 +1,14 @@
+import type { OverlaySettings } from './shared/types';
+
 export {};
 
 declare global {
   interface Window {
     overlayApi: {
-      getSettings: () => Promise<{
-        anchor: 'top' | 'bottom';
-        offsetX: number;
-        offsetY: number;
-        maxWidth: number;
-        fontSize: number;
-        lineGap: number;
-        textColor: string;
-        translateColor: string;
-        outlineColor: string;
-        background: string;
-        autoHideMs: number;
-        dedupeWindowMs: number;
-        clickthrough: boolean;
-        ocrLang: string;
-      }>;
-      saveSettings: (payload: {
-        anchor: 'top' | 'bottom';
-        offsetX: number;
-        offsetY: number;
-        maxWidth: number;
-        fontSize: number;
-        lineGap: number;
-        textColor: string;
-        translateColor: string;
-        outlineColor: string;
-        background: string;
-        autoHideMs: number;
-        dedupeWindowMs: number;
-        clickthrough: boolean;
-        ocrLang: string;
-      }) => Promise<{
-        anchor: 'top' | 'bottom';
-        offsetX: number;
-        offsetY: number;
-        maxWidth: number;
-        fontSize: number;
-        lineGap: number;
-        textColor: string;
-        translateColor: string;
-        outlineColor: string;
-        background: string;
-        autoHideMs: number;
-        dedupeWindowMs: number;
-        clickthrough: boolean;
-        ocrLang: string;
-      }>;
+      getSettings: () => Promise<OverlaySettings>;
+      saveSettings: (payload: OverlaySettings) => Promise<OverlaySettings>;
       setClickthrough: (enabled: boolean) => Promise<boolean>;
+      copyText: (text: string) => Promise<boolean>;
       getGameId: () => Promise<string>;
       pickRegion: () => Promise<{
         status: string;
@@ -64,6 +22,7 @@ declare global {
         profile_path?: string;
       }>;
       onTogglePanel: (callback: () => void) => void;
+      onCopyCurrent: (callback: () => void) => void;
     };
     pickerApi: {
       select: () => void;

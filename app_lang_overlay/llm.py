@@ -8,7 +8,7 @@ from .config import load_runtime_llm_config
 
 
 class LocalTranslator:
-    def __init__(self, target_lang: str = "en") -> None:
+    def __init__(self, target_lang: str = "繁體中文") -> None:
         self.target_lang = target_lang
         self._llm = None
         self._enabled = False
