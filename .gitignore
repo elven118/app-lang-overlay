@@ -36,3 +36,6 @@ data/profiles/
 .DS_Store
 .idea/
 .vscode/
+
+# models
+models/

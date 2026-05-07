@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
+from pathlib import Path
 from typing import AsyncIterator
 
 import mss
 from PIL import Image
 import numpy as np
 import cv2
+
+# Keep PaddleOCR/PaddleX model cache under the project for easier model management
+# and later conversion workflows (e.g. paddle2onnx).
+_PADDLE_MODEL_ROOT = Path("./models/.paddlex").resolve()
+_PADDLE_MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(_PADDLE_MODEL_ROOT))
+os.environ.setdefault("PADDLE_HOME", str(_PADDLE_MODEL_ROOT))
+
 from paddleocr import PaddleOCR 
 
 from .config import get_ocr_lang, profile_path, try_load_capture_region

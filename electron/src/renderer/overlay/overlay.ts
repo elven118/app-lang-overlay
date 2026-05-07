@@ -189,13 +189,15 @@ async function persistFromPanel(): Promise<void> {
 
 async function togglePanel(nextVisible: boolean): Promise<void> {
   panelVisible = nextVisible;
-  panel.classList.toggle('visible', panelVisible);
-  panel.classList.toggle('hidden', !panelVisible);
   if (panelVisible) {
+    await window.overlayApi.setClickthrough(false); 
+    
     syncPanelFromSettings();
-    await window.overlayApi.setClickthrough(false);
+    panel.classList.remove('hidden');
+    
     show('Overlay settings', 'Press Cmd/Ctrl+Shift+O to close', 4000);
   } else {
+    panel.classList.add('hidden');
     await window.overlayApi.setClickthrough(settings.clickthrough);
   }
 }

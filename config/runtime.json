@@ -1,6 +1,6 @@
 {
   "llm": {
-    "model_path": "/Users/elvenlau/Documents/multi-lang-playground/models/HY-MT1.5-7B-Q4_K_M.gguf",
+    "model_path": "./models/HY-MT1.5-7B-Q4_K_M.gguf",
     "fallbacks": [],
     "n_gpu_layers": -1,
     "n_ctx": 4096,
@@ -10,6 +10,6 @@
     "chat_format": null
   },
   "overlay": {
-    "input_mode": "accessibility"
+    "input_mode": "ocr"
   }
 }
