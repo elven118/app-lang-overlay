@@ -11,18 +11,25 @@
 </head>
 
 <body>
-  <div id="root" class="anchor">
+  <div id="root" class="anchor-bottom">
     <div id="subtitle-box" class="hidden">
-      <div id="source" class="line source"></div>
-      <div id="translated" class="line translated"></div>
+      <div id="source" class="line"></div>
+      <div id="translated" class="line"></div>
     </div>
   </div>
+  <div id="selection-area" class="hidden"></div>
   <div id="settings-panel" class="hidden">
     <div class="panel-title">Overlay Settings</div>
-    <label>Offset X <input id="setting-offset-x" type="number" step="1" /></label>
-    <label>Offset Y <input id="setting-offset-y" type="number" step="1" /></label>
+    <label>Position 
+      <select id="setting-position">
+        <option value="top">Top</option>
+        <option value="bottom">Bottom</option>
+      </select>
+    </label>
     <label>Width <input id="setting-width" type="number" step="1" min="0" /></label>
-    <label>Font Size <input id="setting-font-size" type="number" step="1" min="0" /></label>
+    <label class="checkline"><input id="setting-show-source" type="checkbox" />Show Source</label>
+    <label>Source Font Size <input id="setting-source-font-size" type="number" step="1" min="0" /></label>
+    <label>Translated Font Size <input id="setting-translated-font-size" type="number" step="1" min="0" /></label>
     <label>Source Text Color <input id="setting-text-color" type="color" /></label>
     <label>Translated Text Color <input id="setting-translate-color" type="color" /></label>
     <label>Background Color <input id="setting-background-color" type="color" /></label>

@@ -11,29 +11,24 @@ import {
   MenuItemConstructorOptions,
   screen,
 } from "electron";
-import type { OverlaySettings } from "./shared/types";
+import type { CaptureRegion, OverlaySettings } from "./shared/types";
 
 interface SelectionWindow extends BrowserWindow {
   display?: Display;
   displayIndex?: number;
 }
 
-type CaptureRegion = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
 const DEFAULT_SETTINGS: OverlaySettings = {
   offsetX: 0,
   offsetY: 0,
+  showSource: true,
+  position: "bottom",
   width: 600,
-  fontSize: 12,
+  sourceFontSize: 12,
+  translatedFontSize: 12,
   lineGap: 10,
   textColor: "#ffffff",
   translateColor: "#ffd166",
-  outlineColor: "#000000",
   background: "rgba(0,0,0,0.35)",
   autoHideMs: 5000,
   dedupeWindowMs: 1200,
@@ -129,7 +124,8 @@ function saveOverlaySettings(game: string, settings: OverlaySettings): OverlaySe
     ...DEFAULT_SETTINGS,
     ...settings,
     width: Math.round(settings.width),
-    fontSize: Math.max(0, Math.round(settings.fontSize)),
+    sourceFontSize: Math.max(0, Math.round(settings.sourceFontSize)),
+    translatedFontSize: Math.max(0, Math.round(settings.translatedFontSize)),
     lineGap: Math.max(0, Math.round(settings.lineGap)),
     autoHideMs: Math.max(300, Math.round(settings.autoHideMs)),
     dedupeWindowMs: Math.max(0, Math.round(settings.dedupeWindowMs)),
@@ -152,12 +148,12 @@ function saveCaptureRegion(game: string, region: CaptureRegion): void {
   profile.capture_region = region;
   profile.capture_display_id = targetDisplay.id;
 
-  const existing = (profile.overlay_settings || {}) as Partial<OverlaySettings>;
+  const existing = (profile.overlay_settings || {}) as OverlaySettings;
   const displayBounds = targetDisplay.bounds;
   const captureCenterX = region.left - displayBounds.x + region.width / 2;
   const displayCenterX = displayBounds.width / 2;
   const offsetX = Math.round(captureCenterX - displayCenterX);
-  const offsetY = Math.round(region.top - displayBounds.y + region.height) + 5;
+  const offsetY = Math.round(region.top - displayBounds.y + region.height);
   const width = Math.round(region.width);
   profile.overlay_settings = {
     ...DEFAULT_SETTINGS,

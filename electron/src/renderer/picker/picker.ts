@@ -1,9 +1,4 @@
-type CaptureRegion = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
+import type { CaptureRegion } from '../../shared/types';
 
 const hint = document.getElementById("hint") as HTMLDivElement;
 const selection = document.getElementById("selection") as HTMLDivElement;

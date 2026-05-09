@@ -33,11 +33,13 @@ const translatedEl = document.getElementById('translated') as HTMLDivElement;
 const box = document.getElementById('subtitle-box') as HTMLDivElement;
 const root = document.getElementById('root') as HTMLDivElement;
 const panel = document.getElementById('settings-panel') as HTMLDivElement;
+const selectionArea = document.getElementById('selection-area') as HTMLDivElement;
 
-const offsetXInput = document.getElementById('setting-offset-x') as HTMLInputElement;
-const offsetYInput = document.getElementById('setting-offset-y') as HTMLInputElement;
+const positionInput = document.getElementById('setting-position') as HTMLSelectElement;
 const widthInput = document.getElementById('setting-width') as HTMLInputElement;
-const fontSizeInput = document.getElementById('setting-font-size') as HTMLInputElement;
+const showSourceInput = document.getElementById('setting-show-source') as HTMLInputElement;
+const sourceFontSizeInput = document.getElementById('setting-source-font-size') as HTMLInputElement;
+const translatedFontSizeInput = document.getElementById('setting-translated-font-size') as HTMLInputElement;
 const textColorInput = document.getElementById('setting-text-color') as HTMLInputElement;
 const translateColorInput = document.getElementById('setting-translate-color') as HTMLInputElement;
 const backgroundColorInput = document.getElementById('setting-background-color') as HTMLInputElement;
@@ -54,18 +56,27 @@ let gameId = 'demo';
 let panelVisible = false;
 let latestSourceText = '';
 let latestTranslatedText = '';
+let dragging = false;
 const dedupeSeen = new Map<string, number>();
 
 function setStyle(nextSettings: OverlaySettings): void {
-  document.documentElement.style.setProperty('--font-size', `${nextSettings.fontSize}px`);
+  document.documentElement.style.setProperty('--source-font-size', `${nextSettings.sourceFontSize}px`);
+  document.documentElement.style.setProperty('--translated-font-size', `${nextSettings.translatedFontSize}px`);
   document.documentElement.style.setProperty('--line-gap', `${nextSettings.lineGap}px`);
   document.documentElement.style.setProperty('--text-color', nextSettings.textColor);
   document.documentElement.style.setProperty('--translate-color', nextSettings.translateColor);
-  document.documentElement.style.setProperty('--outline-color', nextSettings.outlineColor);
   document.documentElement.style.setProperty('--bg', nextSettings.background);
-  document.documentElement.style.setProperty('--max-width', `${nextSettings.width}px`);
   document.documentElement.style.setProperty('--offset-x', `${nextSettings.offsetX}px`);
   document.documentElement.style.setProperty('--offset-y', `${nextSettings.offsetY}px`);
+  document.documentElement.style.setProperty('--width', `${nextSettings.width}px`);
+  document.documentElement.style.setProperty('--show-source', nextSettings.showSource ? 'block' : 'none');
+  if (nextSettings.position === 'top') {
+    root.classList.remove('anchor-bottom');
+    root.classList.add('anchor-top');
+  } else {
+    root.classList.remove('anchor-top');
+    root.classList.add('anchor-bottom');
+  }
 }
 
 function show(sourceText: string, translatedText: string | null, hideAfterMs: number | undefined): void {
@@ -145,10 +156,11 @@ function composeBackground(): string {
 }
 
 function syncPanelFromSettings(): void {
-  offsetXInput.value = String(settings.offsetX);
-  offsetYInput.value = String(settings.offsetY);
+  positionInput.value = settings.position;
   widthInput.value = String(settings.width);
-  fontSizeInput.value = String(settings.fontSize);
+  showSourceInput.checked = settings.showSource;
+  sourceFontSizeInput.value = String(settings.sourceFontSize);
+  translatedFontSizeInput.value = String(settings.translatedFontSize);
   textColorInput.value = settings.textColor.startsWith('#') ? settings.textColor : '#ffffff';
   translateColorInput.value = settings.translateColor.startsWith('#') ? settings.translateColor : '#ffd166';
   const bg = parseBackground(settings.background);
@@ -163,10 +175,11 @@ function syncPanelFromSettings(): void {
 function parsePanelSettings(): OverlaySettings {
   return {
     ...settings,
-    offsetX: Number(offsetXInput.value || settings.offsetX),
-    offsetY: Number(offsetYInput.value || settings.offsetY),
+    position: positionInput.value === 'top' ? 'top' : 'bottom',
     width: Number(widthInput.value || settings.width),
-    fontSize: Number(fontSizeInput.value || settings.fontSize),
+    showSource: showSourceInput.checked,
+    sourceFontSize: Number(sourceFontSizeInput.value || settings.sourceFontSize),
+    translatedFontSize: Number(translatedFontSizeInput.value || settings.translatedFontSize),
     textColor: textColorInput.value || settings.textColor,
     translateColor: translateColorInput.value || settings.translateColor,
     background: composeBackground(),
@@ -194,10 +207,13 @@ async function togglePanel(nextVisible: boolean): Promise<void> {
     
     syncPanelFromSettings();
     panel.classList.remove('hidden');
+
+    selectionArea.classList.remove('hidden');
     
     show('Overlay settings', 'Press Cmd/Ctrl+Shift+O to close', 4000);
   } else {
     panel.classList.add('hidden');
+    selectionArea.classList.add('hidden');
     await window.overlayApi.setClickthrough(settings.clickthrough);
   }
 }
@@ -239,10 +255,11 @@ function installPanelEvents(): void {
     void persistFromPanel();
   };
 
-  offsetXInput.addEventListener('change', persist);
-  offsetYInput.addEventListener('change', persist);
+  positionInput.addEventListener('change', persist);
   widthInput.addEventListener('change', persist);
-  fontSizeInput.addEventListener('change', persist);
+  showSourceInput.addEventListener('change', persist);
+  sourceFontSizeInput.addEventListener('change', persist);
+  translatedFontSizeInput.addEventListener('change', persist);
   textColorInput.addEventListener('input', persist);
   translateColorInput.addEventListener('input', persist);
   backgroundColorInput.addEventListener('input', persist);
@@ -277,6 +294,29 @@ function installPanelEvents(): void {
     }
   });
 }
+
+// window.pickerApi.onStartDrag((payload) => {
+//   mode = "drag";
+//   originX = payload?.originX ?? 0;
+//   originY = payload?.originY ?? 0;
+//   document.body.classList.add("drag-mode");
+// });
+
+// document.addEventListener("mousedown", (event: MouseEvent) => {
+//   if (mode !== "drag" || event.button !== 0) return;
+//   dragging = true;
+//   startX = event.clientX;
+//   startY = event.clientY;
+// });
+
+// document.addEventListener("mousemove", (event: MouseEvent) => {
+//   if (!dragging) return;
+// });
+
+// document.addEventListener("mouseup", async (event: MouseEvent) => {
+//   if (!dragging) return;
+//   dragging = false;
+// });
 
 (async () => {
   gameId = await window.overlayApi.getGameId();

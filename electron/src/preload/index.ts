@@ -1,12 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { OverlaySettings } from '../shared/types';
-
-type CaptureRegion = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
+import type { CaptureRegion, OverlaySettings } from '../shared/types';
 
 contextBridge.exposeInMainWorld('overlayApi', {
   getSettings: (): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:get-settings'),
