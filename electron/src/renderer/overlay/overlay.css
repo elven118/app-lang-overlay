@@ -48,13 +48,13 @@ html, body {
   margin-top: var(--line-gap); 
 }
 
-#selected-area {
+#selection-area {
   position: fixed;
   border: 2px solid #4da3ff;
   background: rgba(77, 163, 255, 0.25);
-  pointer-events: none;
+  box-sizing: border-box;
 }
-#selected-area.hidden { display: none; }
+#selection-area.hidden { display: none; }
 
 #settings-panel {
   position: fixed;

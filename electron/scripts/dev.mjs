@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../..');
-const venvPython = path.join(repoRoot, '.venv', 'bin', 'python');
+const venvPython = process.platform === 'win32' 
+  ? path.join(repoRoot, '.venv', 'Scripts', 'python.exe')
+  : path.join(repoRoot, '.venv', 'bin', 'python');
+
 
 function loadRuntimeConfig() {
   const configPath = path.join(repoRoot, 'config', 'runtime.json');
@@ -38,7 +41,9 @@ const backendArgs = [
   '--dedupe-window-ms', dedupeWindowMs
 ];
 
-const backendPython = fs.existsSync(venvPython) ? venvPython : 'python3';
+const backendPython = fs.existsSync(venvPython) 
+  ? venvPython 
+  : (process.platform === 'win32' ? 'python' : 'python3');
 
 const backend = spawn(backendPython, backendArgs, {
   stdio: 'inherit',
@@ -51,6 +56,7 @@ delete electronEnv.ELECTRON_RUN_AS_NODE;
 const electron = spawn('npx', ['electron', '.'], {
   stdio: 'inherit',
   cwd: path.resolve(__dirname, '..'),
+  shell: true,
   env: {
     ...electronEnv,
     ...(tesseractCmd ? { TESSERACT_CMD: tesseractCmd } : {}),

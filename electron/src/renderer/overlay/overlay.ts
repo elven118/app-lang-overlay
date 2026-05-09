@@ -59,6 +59,23 @@ let latestTranslatedText = '';
 let dragging = false;
 const dedupeSeen = new Map<string, number>();
 
+function syncSelectionArea(nextSettings: OverlaySettings): void {
+  const region = nextSettings.captureRegion;
+  if (!region || region.width <= 0 || region.height <= 0) {
+    selectionArea.classList.add('hidden');
+    return;
+  }
+
+  selectionArea.style.left = `${region.left}px`;
+  selectionArea.style.top = `${region.top}px`;
+  selectionArea.style.width = `${region.width}px`;
+  selectionArea.style.height = `${region.height}px`;
+
+  if (panelVisible) {
+    selectionArea.classList.remove('hidden');
+  }
+}
+
 function setStyle(nextSettings: OverlaySettings): void {
   document.documentElement.style.setProperty('--source-font-size', `${nextSettings.sourceFontSize}px`);
   document.documentElement.style.setProperty('--translated-font-size', `${nextSettings.translatedFontSize}px`);
@@ -77,6 +94,7 @@ function setStyle(nextSettings: OverlaySettings): void {
     root.classList.remove('anchor-top');
     root.classList.add('anchor-bottom');
   }
+  syncSelectionArea(nextSettings);
 }
 
 function show(sourceText: string, translatedText: string | null, hideAfterMs: number | undefined): void {

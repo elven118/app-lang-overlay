@@ -21,4 +21,5 @@ export type OverlaySettings = {
   dedupeWindowMs: number;
   clickthrough: boolean;
   ocrLang: string;
+  captureRegion?: CaptureRegion;
 };

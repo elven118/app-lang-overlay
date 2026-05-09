@@ -161,6 +161,12 @@ function saveCaptureRegion(game: string, region: CaptureRegion): void {
     offsetX,
     offsetY,
     width,
+    captureRegion: {
+      left: Math.round(region.left - displayBounds.x),
+      top: Math.round(region.top - displayBounds.y),
+      width,
+      height: Math.round(region.height),
+    },
   };
 
   saveProfile(game, profile);
@@ -390,7 +396,7 @@ app.whenReady().then(() => {
       console.error("[overlay] picker failed:", err);
     });
   });
-  globalShortcut.register("CommandOrControl+Shift+O", () => {
+  globalShortcut.register("CommandOrControl+Shift+P", () => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay:toggle-panel");
     }
