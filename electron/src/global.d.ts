@@ -33,7 +33,9 @@ declare global {
         height: number;
       }) => Promise<unknown>;
       cancel: () => Promise<unknown>;
-      onStartDrag: (callback: (payload: { originX: number; originY: number }) => void) => void;
+      onStartDrag: (
+        callback: (payload: { originX: number; originY: number; captureScaleFactor: number }) => void
+      ) => void;
     };
   }
 }

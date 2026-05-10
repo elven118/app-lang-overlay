@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('pickerApi', {
   select: () => ipcRenderer.send('display-selected'),
   submit: (region: CaptureRegion): Promise<unknown> => ipcRenderer.invoke('picker:submit', region),
   cancel: (): Promise<unknown> => ipcRenderer.invoke('picker:cancel'),
-  onStartDrag: (callback: (payload: { originX: number; originY: number }) => void) => {
+  onStartDrag: (callback: (payload: { originX: number; originY: number; captureScaleFactor: number }) => void) => {
     ipcRenderer.on('picker:start-drag', (_event, payload) => callback(payload));
   }
 });

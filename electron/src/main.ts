@@ -306,6 +306,7 @@ ipcMain.on("display-selected", (event) => {
   selectedWindow.webContents.send("picker:start-drag", {
     originX: bounds.x,
     originY: bounds.y,
+    captureScaleFactor: process.platform === "win32" ? (selectedWindow.display?.scaleFactor ?? 1) : 1,
   });
 });
 

@@ -10,6 +10,7 @@ let startX = 0;
 let startY = 0;
 let originX = 0;
 let originY = 0;
+let captureScaleFactor = 1;
 
 function drawRect(x1: number, y1: number, x2: number, y2: number): CaptureRegion {
   const left = Math.min(x1, x2);
@@ -41,6 +42,7 @@ window.pickerApi.onStartDrag((payload) => {
   mode = "drag";
   originX = payload?.originX ?? 0;
   originY = payload?.originY ?? 0;
+  captureScaleFactor = payload?.captureScaleFactor ?? 1;
   document.body.classList.add("drag-mode");
   hint.textContent = "Drag to select region. Release mouse to confirm. ESC or right-click to cancel.";
 });
@@ -76,7 +78,15 @@ document.addEventListener("mouseup", async (event: MouseEvent) => {
     height: localRegion.height,
   };
 
-  await window.pickerApi.submit(absoluteRegion);
+  // Picker works in DIPs; capture uses a precomputed scale from main.
+  const captureRegion: CaptureRegion = {
+    left: Math.round(absoluteRegion.left * captureScaleFactor),
+    top: Math.round(absoluteRegion.top * captureScaleFactor),
+    width: Math.round(absoluteRegion.width * captureScaleFactor),
+    height: Math.round(absoluteRegion.height * captureScaleFactor),
+  };
+
+  await window.pickerApi.submit(captureRegion);
 });
 
 document.addEventListener("keydown", async (event: KeyboardEvent) => {
