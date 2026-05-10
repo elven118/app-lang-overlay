@@ -6,7 +6,7 @@ Accessibility API, which is what this module uses via osascript / AppleScript.
 
 Requirements: no extra Python packages — osascript ships with macOS.
 Accessibility permission for the Terminal / Python executable is required (same
-permission already needed for PaddleOCR's region capture on protected apps).
+permission model used by other protected subtitle capture paths).
 """
 from __future__ import annotations
 
