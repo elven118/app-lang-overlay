@@ -19,10 +19,12 @@ interface SelectionWindow extends BrowserWindow {
 }
 
 const DEFAULT_SETTINGS: OverlaySettings = {
-  offsetX: 0,
-  offsetY: 0,
+  placementMode: "free",
+  placement: {
+    above: { xShift: 0, gapY: 0 },
+    free: { x: 24, y: 24 },
+  },
   showSource: true,
-  position: "bottom",
   width: 600,
   sourceFontSize: 12,
   translatedFontSize: 12,
@@ -35,6 +37,104 @@ const DEFAULT_SETTINGS: OverlaySettings = {
   clickthrough: true,
   ocrLang: "en",
 };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function asFiniteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeCaptureRegion(value: unknown): CaptureRegion | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<CaptureRegion>;
+  const left = asFiniteNumber(raw.left, NaN);
+  const top = asFiniteNumber(raw.top, NaN);
+  const width = asFiniteNumber(raw.width, NaN);
+  const height = asFiniteNumber(raw.height, NaN);
+  if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  return {
+    left: Math.round(left),
+    top: Math.round(top),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function createDefaultPlacement(
+  width: number,
+  captureRegion: CaptureRegion | undefined,
+): OverlaySettings["placement"] {
+  const captureCenterX = captureRegion ? captureRegion.left + captureRegion.width / 2 : width / 2;
+  const freeX = Math.max(0, Math.round(captureCenterX - width / 2));
+  const freeY = captureRegion ? Math.max(0, Math.round(captureRegion.top + captureRegion.height)) : 24;
+  return {
+    above: { xShift: 0, gapY: 0 },
+    free: { x: freeX, y: freeY },
+  };
+}
+
+function normalizeOverlaySettings(
+  rawValue: unknown,
+  displayBounds: { width: number; height: number },
+): OverlaySettings {
+  const raw = ((rawValue || {}) as Partial<OverlaySettings>) || {};
+  const captureRegion = normalizeCaptureRegion(raw.captureRegion);
+  const width = Math.max(1, Math.round(asFiniteNumber(raw.width, captureRegion?.width ?? DEFAULT_SETTINGS.width)));
+
+  const defaults = createDefaultPlacement(width, captureRegion);
+  const rawPlacement = (raw.placement || {}) as Partial<OverlaySettings["placement"]>;
+  const rawAbove = (rawPlacement.above || {}) as Partial<OverlaySettings["placement"]["above"]>;
+  const rawFree = (rawPlacement.free || {}) as Partial<OverlaySettings["placement"]["free"]>;
+
+  const placement: OverlaySettings["placement"] = {
+    above: {
+      xShift: Math.round(asFiniteNumber(rawAbove.xShift, defaults.above.xShift)),
+      gapY: Math.max(0, Math.round(asFiniteNumber(rawAbove.gapY, defaults.above.gapY))),
+    },
+    free: {
+      x: Math.round(asFiniteNumber(rawFree.x, defaults.free.x)),
+      y: Math.round(asFiniteNumber(rawFree.y, defaults.free.y)),
+    },
+  };
+
+  const maxFreeX = Math.max(0, displayBounds.width - width);
+  placement.free.x = clamp(placement.free.x, 0, maxFreeX);
+  placement.free.y = clamp(placement.free.y, 0, Math.max(0, displayBounds.height));
+
+  const placementMode = raw.placementMode === "above" || raw.placementMode === "free"
+    ? raw.placementMode
+    : DEFAULT_SETTINGS.placementMode;
+
+  const background = typeof raw.background === "string" ? raw.background : DEFAULT_SETTINGS.background;
+  const textColor = typeof raw.textColor === "string" ? raw.textColor : DEFAULT_SETTINGS.textColor;
+  const translateColor = typeof raw.translateColor === "string" ? raw.translateColor : DEFAULT_SETTINGS.translateColor;
+
+  return {
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    placementMode,
+    placement,
+    width,
+    sourceFontSize: Math.max(0, Math.round(asFiniteNumber(raw.sourceFontSize, DEFAULT_SETTINGS.sourceFontSize))),
+    translatedFontSize: Math.max(
+      0,
+      Math.round(asFiniteNumber(raw.translatedFontSize, DEFAULT_SETTINGS.translatedFontSize)),
+    ),
+    lineGap: Math.max(0, Math.round(asFiniteNumber(raw.lineGap, DEFAULT_SETTINGS.lineGap))),
+    autoHideMs: Math.max(300, Math.round(asFiniteNumber(raw.autoHideMs, DEFAULT_SETTINGS.autoHideMs))),
+    dedupeWindowMs: Math.max(0, Math.round(asFiniteNumber(raw.dedupeWindowMs, DEFAULT_SETTINGS.dedupeWindowMs))),
+    clickthrough: typeof raw.clickthrough === "boolean" ? raw.clickthrough : DEFAULT_SETTINGS.clickthrough,
+    ocrLang: String(raw.ocrLang || DEFAULT_SETTINGS.ocrLang),
+    background,
+    textColor,
+    translateColor,
+    captureRegion,
+  };
+}
 
 const gameId = process.env.GAME_ID || "demo";
 const wsUrl = process.env.OVERLAY_WS_URL || "ws://127.0.0.1:8765";
@@ -68,6 +168,35 @@ function getTargetDisplay(profile: Record<string, unknown>): Display {
   return screen.getPrimaryDisplay();
 }
 
+function deriveOverlayCaptureRegion(profile: Record<string, unknown>, targetDisplay: Display): CaptureRegion | undefined {
+  const region = profile.capture_region as Partial<CaptureRegion> | undefined;
+  if (
+    !region ||
+    typeof region.left !== "number" ||
+    typeof region.top !== "number" ||
+    typeof region.width !== "number" ||
+    typeof region.height !== "number" ||
+    region.width <= 0 ||
+    region.height <= 0
+  ) {
+    return undefined;
+  }
+
+  const scaleFactor = process.platform === "win32" ? (targetDisplay.scaleFactor || 1) : 1;
+  const toDip = (value: number): number => value / scaleFactor;
+  const bounds = targetDisplay.bounds;
+  const origin = profile.capture_window_origin as { x?: unknown; y?: unknown } | undefined;
+  const originX = typeof origin?.x === "number" && Number.isFinite(origin.x) ? origin.x : bounds.x;
+  const originY = typeof origin?.y === "number" && Number.isFinite(origin.y) ? origin.y : bounds.y;
+
+  return {
+    left: Math.round(toDip(region.left) - originX),
+    top: Math.round(toDip(region.top) - originY),
+    width: Math.max(1, Math.round(toDip(region.width))),
+    height: Math.max(1, Math.round(toDip(region.height))),
+  };
+}
+
 function profilePathFor(game: string): string {
   return path.join(repoRoot, "data", "profiles", `${game}.json`);
 }
@@ -92,9 +221,18 @@ function ensureProfileExists(game: string): Record<string, unknown> {
   if (typeof profile.game_id !== "string") {
     profile.game_id = game;
   }
-  if (profile.overlay_settings === undefined) {
-    profile.overlay_settings = { ...DEFAULT_SETTINGS };
+  const targetDisplay = getTargetDisplay(profile);
+  let normalized = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
+  if (!normalized.captureRegion) {
+    const derivedRegion = deriveOverlayCaptureRegion(profile, targetDisplay);
+    if (derivedRegion) {
+      normalized = normalizeOverlaySettings(
+        { ...normalized, captureRegion: derivedRegion, width: derivedRegion.width },
+        targetDisplay.bounds,
+      );
+    }
   }
+  profile.overlay_settings = normalized;
   saveProfile(game, profile);
   return profile;
 }
@@ -115,59 +253,78 @@ function hasCaptureRegion(game: string): boolean {
 
 function getOverlaySettings(game: string): OverlaySettings {
   const profile = loadProfile(game);
-  const saved = (profile.overlay_settings || {}) as Partial<OverlaySettings>;
-  return { ...DEFAULT_SETTINGS, ...saved };
-}
-
-function saveOverlaySettings(game: string, settings: OverlaySettings): OverlaySettings {
-  const normalized: OverlaySettings = {
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    width: Math.round(settings.width),
-    sourceFontSize: Math.max(0, Math.round(settings.sourceFontSize)),
-    translatedFontSize: Math.max(0, Math.round(settings.translatedFontSize)),
-    lineGap: Math.max(0, Math.round(settings.lineGap)),
-    autoHideMs: Math.max(300, Math.round(settings.autoHideMs)),
-    dedupeWindowMs: Math.max(0, Math.round(settings.dedupeWindowMs)),
-    clickthrough: Boolean(settings.clickthrough),
-    ocrLang: String(settings.ocrLang || "en"),
-  };
-
-  const profile = loadProfile(game);
+  const targetDisplay = getTargetDisplay(profile);
+  let normalized = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
+  if (!normalized.captureRegion) {
+    const derivedRegion = deriveOverlayCaptureRegion(profile, targetDisplay);
+    if (derivedRegion) {
+      normalized = normalizeOverlaySettings(
+        { ...normalized, captureRegion: derivedRegion, width: derivedRegion.width },
+        targetDisplay.bounds,
+      );
+    }
+  }
   profile.overlay_settings = normalized;
   saveProfile(game, profile);
   return normalized;
 }
 
-function saveCaptureRegion(game: string, region: CaptureRegion): void {
+function saveOverlaySettings(game: string, settings: OverlaySettings): OverlaySettings {
+  const profile = loadProfile(game);
+  const targetDisplay = getTargetDisplay(profile);
+  const normalized = normalizeOverlaySettings(settings, targetDisplay.bounds);
+  profile.overlay_settings = normalized;
+  saveProfile(game, profile);
+  return normalized;
+}
+
+function saveCaptureRegion(
+  game: string,
+  region: CaptureRegion,
+  pickerWindowBounds?: { x: number; y: number },
+): void {
   const profile = loadProfile(game);
   const targetDisplay = screen.getDisplayNearestPoint({
     x: Math.round(region.left + region.width / 2),
     y: Math.round(region.top + region.height / 2),
   });
+  const scaleFactor = process.platform === "win32" ? (targetDisplay.scaleFactor || 1) : 1;
+  const toDip = (value: number): number => value / scaleFactor;
+
   profile.capture_region = region;
   profile.capture_display_id = targetDisplay.id;
 
-  const existing = (profile.overlay_settings || {}) as OverlaySettings;
   const displayBounds = targetDisplay.bounds;
-  const captureCenterX = region.left - displayBounds.x + region.width / 2;
-  const displayCenterX = displayBounds.width / 2;
-  const offsetX = Math.round(captureCenterX - displayCenterX);
-  const offsetY = Math.round(region.top - displayBounds.y + region.height);
-  const width = Math.round(region.width);
-  profile.overlay_settings = {
-    ...DEFAULT_SETTINGS,
-    ...existing,
-    offsetX,
-    offsetY,
-    width,
-    captureRegion: {
-      left: Math.round(region.left - displayBounds.x),
-      top: Math.round(region.top - displayBounds.y),
-      width,
-      height: Math.round(region.height),
-    },
+  const originX = pickerWindowBounds?.x ?? displayBounds.x;
+  const originY = pickerWindowBounds?.y ?? displayBounds.y;
+  profile.capture_window_origin = { x: Math.round(originX), y: Math.round(originY) };
+
+  const localLeftDip = toDip(region.left) - originX;
+  const localTopDip = toDip(region.top) - originY;
+  const widthDip = toDip(region.width);
+  const heightDip = toDip(region.height);
+  const captureRegion: CaptureRegion = {
+    left: Math.round(localLeftDip),
+    top: Math.round(localTopDip),
+    width: Math.max(1, Math.round(widthDip)),
+    height: Math.max(1, Math.round(heightDip)),
   };
+
+  const existing = normalizeOverlaySettings(profile.overlay_settings, displayBounds);
+  profile.overlay_settings = normalizeOverlaySettings({
+    ...existing,
+    placementMode: existing.placementMode || "free",
+    width: captureRegion.width,
+    captureRegion,
+    placement: {
+      ...existing.placement,
+      free: {
+        ...existing.placement.free,
+        x: Math.round(captureRegion.left),
+        y: Math.round(captureRegion.top + captureRegion.height),
+      },
+    },
+  }, displayBounds);
 
   saveProfile(game, profile);
 }
@@ -337,12 +494,15 @@ ipcMain.handle("overlay:pick-region", async () => {
   return { status: "started" };
 });
 
-ipcMain.handle("picker:submit", (_event, region: CaptureRegion) => {
+ipcMain.handle("picker:submit", (event, region: CaptureRegion) => {
   if (region.width <= 0 || region.height <= 0) {
     return { status: "invalid" };
   }
 
-  saveCaptureRegion(gameId, region);
+  const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
+  const pickerBounds = selectedWindow && !selectedWindow.isDestroyed() ? selectedWindow.getBounds() : undefined;
+
+  saveCaptureRegion(gameId, region, pickerBounds);
   refreshOverlayWindowForProfile();
   closeRegionPickerWindows();
 

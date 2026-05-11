@@ -26,7 +26,7 @@ type HealthEvent = {
 
 type OverlayEvent = SubtitleEvent | ClearEvent | HealthEvent;
 
-import type { OverlaySettings } from '../../shared/types';
+import type { CaptureRegion, OverlaySettings } from '../../shared/types';
 
 const sourceEl = document.getElementById('source') as HTMLDivElement;
 const translatedEl = document.getElementById('translated') as HTMLDivElement;
@@ -56,12 +56,46 @@ let gameId = 'demo';
 let panelVisible = false;
 let latestSourceText = '';
 let latestTranslatedText = '';
-let dragging = false;
 const dedupeSeen = new Map<string, number>();
 
-function syncSelectionArea(nextSettings: OverlaySettings): void {
+type DragState =
+  | {
+      mode: 'above';
+      startMouseX: number;
+      startMouseY: number;
+      startXShift: number;
+      startGapY: number;
+    }
+  | {
+      mode: 'free';
+      startMouseX: number;
+      startMouseY: number;
+      startX: number;
+      startY: number;
+    };
+
+let dragState: DragState | null = null;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getCaptureRegion(nextSettings: OverlaySettings): CaptureRegion | null {
   const region = nextSettings.captureRegion;
-  if (!region || region.width <= 0 || region.height <= 0) {
+  if (!region || region.width <= 0 || region.height <= 0) return null;
+  return region;
+}
+
+function getRootSize(): { width: number; height: number } {
+  const rect = root.getBoundingClientRect();
+  const width = Math.max(1, Math.round(rect.width || settings.width || 1));
+  const height = Math.max(1, Math.round(rect.height || 1));
+  return { width, height };
+}
+
+function syncSelectionArea(nextSettings: OverlaySettings): void {
+  const region = getCaptureRegion(nextSettings);
+  if (!region || !panelVisible) {
     selectionArea.classList.add('hidden');
     return;
   }
@@ -70,10 +104,38 @@ function syncSelectionArea(nextSettings: OverlaySettings): void {
   selectionArea.style.top = `${region.top}px`;
   selectionArea.style.width = `${region.width}px`;
   selectionArea.style.height = `${region.height}px`;
+  selectionArea.classList.remove('hidden');
+}
 
-  if (panelVisible) {
-    selectionArea.classList.remove('hidden');
+function applyPlacement(nextSettings: OverlaySettings): void {
+  const region = getCaptureRegion(nextSettings);
+  const { width: boxWidth, height: boxHeight } = getRootSize();
+  const maxX = Math.max(0, window.innerWidth - boxWidth);
+  const maxY = Math.max(0, window.innerHeight - boxHeight);
+
+  let nextX = 0;
+  let nextY = 0;
+
+  if (nextSettings.placementMode === 'above' && region) {
+    const captureCenterX = region.left + region.width / 2;
+    nextX = captureCenterX - boxWidth / 2 + nextSettings.placement.above.xShift;
+    nextX = clamp(Math.round(nextX), 0, maxX);
+
+    const aboveY = region.top - boxHeight - nextSettings.placement.above.gapY;
+    const maxAllowedY = region.top - boxHeight;
+    nextY = Math.round(Math.min(aboveY, maxAllowedY));
+  } else if (nextSettings.placementMode === 'free' || !region) {
+    nextX = clamp(Math.round(nextSettings.placement.free.x), 0, maxX);
+    nextY = clamp(Math.round(nextSettings.placement.free.y), 0, maxY);
+  } else if (region) {
+    const captureCenterX = region.left + region.width / 2;
+    nextX = clamp(Math.round(captureCenterX - boxWidth / 2), 0, maxX);
+    nextY = Math.round(region.top - boxHeight);
   }
+
+  root.style.left = `${nextX}px`;
+  root.style.top = `${nextY}px`;
+  syncSelectionArea(nextSettings);
 }
 
 function setStyle(nextSettings: OverlaySettings): void {
@@ -83,18 +145,11 @@ function setStyle(nextSettings: OverlaySettings): void {
   document.documentElement.style.setProperty('--text-color', nextSettings.textColor);
   document.documentElement.style.setProperty('--translate-color', nextSettings.translateColor);
   document.documentElement.style.setProperty('--bg', nextSettings.background);
-  document.documentElement.style.setProperty('--offset-x', `${nextSettings.offsetX}px`);
-  document.documentElement.style.setProperty('--offset-y', `${nextSettings.offsetY}px`);
   document.documentElement.style.setProperty('--width', `${nextSettings.width}px`);
   document.documentElement.style.setProperty('--show-source', nextSettings.showSource ? 'block' : 'none');
-  if (nextSettings.position === 'top') {
-    root.classList.remove('anchor-bottom');
-    root.classList.add('anchor-top');
-  } else {
-    root.classList.remove('anchor-top');
-    root.classList.add('anchor-bottom');
-  }
-  syncSelectionArea(nextSettings);
+
+  box.classList.toggle('draggable', panelVisible);
+  applyPlacement(nextSettings);
 }
 
 function show(sourceText: string, translatedText: string | null, hideAfterMs: number | undefined): void {
@@ -106,6 +161,7 @@ function show(sourceText: string, translatedText: string | null, hideAfterMs: nu
   box.classList.add('visible');
   if (hideTimer) clearTimeout(hideTimer);
   hideTimer = setTimeout(() => hide(), hideAfterMs || settings.autoHideMs);
+  applyPlacement(settings);
 }
 
 async function copyCurrentText(): Promise<void> {
@@ -125,15 +181,9 @@ function hide(): void {
   box.classList.add('hidden');
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const normalized = hex.trim().replace('#', '');
-  const full = normalized.length === 3
-    ? normalized.split('').map((ch) => ch + ch).join('')
-    : normalized;
+  const full = normalized.length === 3 ? normalized.split('').map((ch) => ch + ch).join('') : normalized;
   const safe = /^[0-9a-fA-F]{6}$/.test(full) ? full : '000000';
   return {
     r: parseInt(safe.slice(0, 2), 16),
@@ -174,7 +224,7 @@ function composeBackground(): string {
 }
 
 function syncPanelFromSettings(): void {
-  positionInput.value = settings.position;
+  positionInput.value = settings.placementMode;
   widthInput.value = String(settings.width);
   showSourceInput.checked = settings.showSource;
   sourceFontSizeInput.value = String(settings.sourceFontSize);
@@ -193,7 +243,7 @@ function syncPanelFromSettings(): void {
 function parsePanelSettings(): OverlaySettings {
   return {
     ...settings,
-    position: positionInput.value === 'top' ? 'top' : 'bottom',
+    placementMode: positionInput.value === 'free' ? 'free' : 'above',
     width: Number(widthInput.value || settings.width),
     showSource: showSourceInput.checked,
     sourceFontSize: Number(sourceFontSizeInput.value || settings.sourceFontSize),
@@ -208,8 +258,7 @@ function parsePanelSettings(): OverlaySettings {
   };
 }
 
-async function persistFromPanel(): Promise<void> {
-  const next = parsePanelSettings();
+async function persistSettings(next: OverlaySettings): Promise<void> {
   settings = await window.overlayApi.saveSettings(next);
   setStyle(settings);
   syncPanelFromSettings();
@@ -218,22 +267,97 @@ async function persistFromPanel(): Promise<void> {
   }
 }
 
+async function persistFromPanel(): Promise<void> {
+  const next = parsePanelSettings();
+  await persistSettings(next);
+}
+
 async function togglePanel(nextVisible: boolean): Promise<void> {
   panelVisible = nextVisible;
   if (panelVisible) {
-    await window.overlayApi.setClickthrough(false); 
-    
+    await window.overlayApi.setClickthrough(false);
+
     syncPanelFromSettings();
     panel.classList.remove('hidden');
+    box.classList.add('draggable');
+    syncSelectionArea(settings);
 
-    selectionArea.classList.remove('hidden');
-    
-    show('Overlay settings', 'Press Cmd/Ctrl+Shift+O to close', 4000);
+    show('Overlay settings', 'Press Cmd/Ctrl+Shift+P to close', 4000);
   } else {
     panel.classList.add('hidden');
     selectionArea.classList.add('hidden');
+    box.classList.remove('draggable');
+    box.classList.remove('dragging');
+    dragState = null;
     await window.overlayApi.setClickthrough(settings.clickthrough);
   }
+  applyPlacement(settings);
+}
+
+function startDrag(event: MouseEvent): void {
+  if (!panelVisible || event.button !== 0) return;
+  event.preventDefault();
+
+  if (settings.placementMode === 'above') {
+    dragState = {
+      mode: 'above',
+      startMouseX: event.clientX,
+      startMouseY: event.clientY,
+      startXShift: settings.placement.above.xShift,
+      startGapY: settings.placement.above.gapY,
+    };
+  } else {
+    dragState = {
+      mode: 'free',
+      startMouseX: event.clientX,
+      startMouseY: event.clientY,
+      startX: settings.placement.free.x,
+      startY: settings.placement.free.y,
+    };
+  }
+
+  box.classList.add('dragging');
+}
+
+function onDragMove(event: MouseEvent): void {
+  if (!dragState) return;
+
+  const dx = event.clientX - dragState.startMouseX;
+  const dy = event.clientY - dragState.startMouseY;
+
+  if (dragState.mode === 'above') {
+    const xShift = Math.round(dragState.startXShift + dx);
+    const gapY = Math.max(0, Math.round(dragState.startGapY - dy));
+    settings = {
+      ...settings,
+      placement: {
+        ...settings.placement,
+        above: { xShift, gapY },
+      },
+    };
+  } else {
+    const { width: boxWidth, height: boxHeight } = getRootSize();
+    const maxX = Math.max(0, window.innerWidth - boxWidth);
+    const maxY = Math.max(0, window.innerHeight - boxHeight);
+    const x = clamp(Math.round(dragState.startX + dx), 0, maxX);
+    const y = clamp(Math.round(dragState.startY + dy), 0, maxY);
+    settings = {
+      ...settings,
+      placement: {
+        ...settings.placement,
+        free: { x, y },
+      },
+    };
+  }
+
+  setStyle(settings);
+}
+
+function endDrag(): void {
+  if (!dragState) return;
+  dragState = null;
+  box.classList.remove('dragging');
+  void persistSettings(settings);
 }
 
 function connect(): void {
@@ -294,9 +418,19 @@ function installPanelEvents(): void {
     void copyCurrentText();
   });
 
+  box.addEventListener('mousedown', startDrag);
+  window.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('resize', () => applyPlacement(settings));
+
+  const resizeObserver = new ResizeObserver(() => {
+    applyPlacement(settings);
+  });
+  resizeObserver.observe(box);
+
   window.addEventListener('keydown', (event) => {
     const isMac = navigator.platform.toUpperCase().includes('MAC');
-    const hotkey = event.shiftKey && event.key.toLowerCase() === 'o' && (isMac ? event.metaKey : event.ctrlKey);
+    const hotkey = event.shiftKey && event.key.toLowerCase() === 'p' && (isMac ? event.metaKey : event.ctrlKey);
     if (hotkey) {
       event.preventDefault();
       void togglePanel(!panelVisible);
@@ -312,29 +446,6 @@ function installPanelEvents(): void {
     }
   });
 }
-
-// window.pickerApi.onStartDrag((payload) => {
-//   mode = "drag";
-//   originX = payload?.originX ?? 0;
-//   originY = payload?.originY ?? 0;
-//   document.body.classList.add("drag-mode");
-// });
-
-// document.addEventListener("mousedown", (event: MouseEvent) => {
-//   if (mode !== "drag" || event.button !== 0) return;
-//   dragging = true;
-//   startX = event.clientX;
-//   startY = event.clientY;
-// });
-
-// document.addEventListener("mousemove", (event: MouseEvent) => {
-//   if (!dragging) return;
-// });
-
-// document.addEventListener("mouseup", async (event: MouseEvent) => {
-//   if (!dragging) return;
-//   dragging = false;
-// });
 
 (async () => {
   gameId = await window.overlayApi.getGameId();

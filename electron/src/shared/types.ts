@@ -5,11 +5,23 @@ export type CaptureRegion = {
   height: number;
 };
 
+export type PlacementMode = 'above' | 'free';
+
+export type OverlayPlacement = {
+  above: {
+    xShift: number;
+    gapY: number;
+  };
+  free: {
+    x: number;
+    y: number;
+  };
+};
+
 export type OverlaySettings = {
   showSource: boolean;
-  position: 'top' | 'bottom';
-  offsetX: number;
-  offsetY: number;
+  placementMode: PlacementMode;
+  placement: OverlayPlacement;
   width: number;
   sourceFontSize: number;
   translatedFontSize: number;
