@@ -9,14 +9,12 @@ html, body {
 
 #root {
   position: fixed;
-  left: 50%;
-  transform: translateX(calc(-50% + var(--offset-x)));
+  left: 0;
+  top: 0;
   width: min(var(--width), calc(100vw - 24px));
   pointer-events: none;
+  will-change: left, top;
 }
-
-.anchor-bottom { top: var(--offset-y); }
-.anchor-top { bottom: var(--offset-y); }
 
 #subtitle-box {
   background: var(--bg);
@@ -24,6 +22,16 @@ html, body {
   border-radius: 12px;
   backdrop-filter: blur(2px);
   transition: opacity 180ms ease;
+  pointer-events: none;
+}
+
+#subtitle-box.draggable {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+#subtitle-box.dragging {
+  cursor: grabbing;
 }
 
 #subtitle-box.hidden { opacity: 0; }
