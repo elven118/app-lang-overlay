@@ -47,7 +47,7 @@ async def run_overlay_backend(
     host: str,
     port: int,
     game: str,
-    interval_ms: int,
+    poll_ms: int,
     input_mode: str,
     ocr_lang: str,
     auto_hide_ms: int,
@@ -94,7 +94,7 @@ async def run_overlay_backend(
             while not stop.is_set():
                 event = next(source)
                 await publish(event)
-                await asyncio.sleep(max(interval_ms, 100) / 1000)
+                await asyncio.sleep(max(poll_ms, 100) / 1000)
             return
 
         if input_mode not in ("ocr", "accessibility"):
@@ -103,9 +103,9 @@ async def run_overlay_backend(
         while not stop.is_set():
             try:
                 stream = (
-                    ocr_stream(game, interval_ms, ocr_lang)
+                    ocr_stream(game, poll_ms, ocr_lang)
                     if input_mode == "ocr"
-                    else ax_stream(game, interval_ms)
+                    else ax_stream(game, poll_ms)
                 )
                 async for event in stream:
                     if stop.is_set():
@@ -119,7 +119,7 @@ async def run_overlay_backend(
                     if not text:
                         if blank_since == 0.0:
                             blank_since = now
-                        hide_timeout_s = max(interval_ms + max(current_auto_hide_ms, 0), 0) / 1000.0
+                        hide_timeout_s = max(poll_ms + max(current_auto_hide_ms, 0), 0) / 1000.0
                         if (
                             current_auto_hide_ms >= 0
                             and overlay_visible

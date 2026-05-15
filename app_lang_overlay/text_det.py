@@ -104,7 +104,7 @@ class OnnxTextDetector:
                 x_j = np.min(box_j[:, 0])
                 x_prev = np.min(box_prev[:, 0])
 
-                if abs(y_j - y_prev) < 10 and x_j < x_prev:
+                if abs(y_j - y_prev) < 20 and x_j < x_prev:
                     results[j], results[j - 1] = results[j - 1], results[j]
                 else:
                     break

@@ -25,7 +25,7 @@ const game = process.env.GAME_ID || overlay.game_id || 'demo';
 const wsHost = process.env.OVERLAY_WS_HOST || overlay.ws_host || '127.0.0.1';
 const wsPort = String(process.env.OVERLAY_WS_PORT || overlay.ws_port || '8765');
 const inputMode = process.env.OVERLAY_INPUT_MODE || overlay.input_mode || 'ocr';
-const intervalMs = String(process.env.OVERLAY_INTERVAL_MS || overlay.interval_ms || '900');
+const pollMs = String(process.env.OVERLAY_POLL_MS || overlay.poll_ms || '900');
 const ocrLang = process.env.OVERLAY_OCR_LANG || overlay.ocr_lang || 'en';
 const tesseractCmd = process.env.TESSERACT_CMD || ocr.tesseract_cmd || '';
 
@@ -35,7 +35,7 @@ const backendArgs = [
   '--host', wsHost,
   '--port', wsPort,
   '--input-mode', inputMode,
-  '--interval-ms', intervalMs,
+  '--poll-ms', pollMs,
   '--ocr-lang', ocrLang
 ];
 
