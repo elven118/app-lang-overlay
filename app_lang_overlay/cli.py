@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     backend.add_argument("--interval-ms", type=int, default=900)
     backend.add_argument("--input-mode", default="ocr")
     backend.add_argument("--ocr-lang", default="en")
-    backend.add_argument("--dedupe-window-ms", type=int, default=1200)
+    backend.add_argument("--auto-hide-ms", type=int, default=-1)
 
     return parser
 
@@ -37,7 +37,7 @@ def main() -> None:
                 interval_ms=args.interval_ms,
                 input_mode=args.input_mode,
                 ocr_lang=args.ocr_lang,
-                dedupe_window_ms=args.dedupe_window_ms,
+                auto_hide_ms=args.auto_hide_ms,
             )
         )
 

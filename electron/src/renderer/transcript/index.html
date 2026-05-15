@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src ws:" />
-  <title>App Lang Overlay</title>
+  <title>Live Caption Transcript</title>
   <link rel="stylesheet" href="overlay.css" />
 </head>
 
@@ -17,15 +17,8 @@
       <div id="translated" class="line"></div>
     </div>
   </div>
-  <div id="selection-area" class="hidden"></div>
   <div id="settings-panel" class="hidden">
-    <div class="panel-title">Overlay Settings</div>
-    <label>Position 
-      <select id="setting-position">
-        <option value="above">Above Capture</option>
-        <option value="free">Free Placement</option>
-      </select>
-    </label>
+    <div class="panel-title">Settings</div>
     <label>Width <input id="setting-width" type="number" step="1" min="0" /></label>
     <label class="checkline"><input id="setting-show-source" type="checkbox" />Show Source</label>
     <label>Source Font Size <input id="setting-source-font-size" type="number" step="1" min="0" /></label>
@@ -34,17 +27,10 @@
     <label>Translated Text Color <input id="setting-translate-color" type="color" /></label>
     <label>Background Color <input id="setting-background-color" type="color" /></label>
     <label>Background Opacity <input id="setting-background-alpha" type="range" min="0" max="100" step="1" /></label>
-    <label>Auto Hide (ms) <input id="setting-autohide" type="number" step="100" min="300" /></label>
-    <label>OCR Input Language
-      <select id="setting-ocr-lang">
-        <option value="en">English (en)</option>
-        <option value="japan">Japanese (japan)</option>
-        <option value="ch">Chinese Simplified (ch)</option>
-        <option value="chinese_cht">Chinese Traditional (chinese_cht)</option>
-        <option value="korean">Korean (korean)</option>
-      </select>
-    </label>
-    <label class="checkline"><input id="setting-clickthrough" type="checkbox" /> Clickthrough</label>
+    <label>Max Lines <input id="setting-max-lines" type="number" step="1" min="0" /></label>
+    <label>Silence Clear (ms) <input id="setting-silence-clear" type="number" min="0" /></label>
+    <label><input id="setting-keep-onscreen" type="checkbox" />Keep Onscreen</label>
+    <label>Play/Pause</label>
   </div>
   <script src="./overlay.js"></script>
 </body>

@@ -27,7 +27,6 @@ const wsPort = String(process.env.OVERLAY_WS_PORT || overlay.ws_port || '8765');
 const inputMode = process.env.OVERLAY_INPUT_MODE || overlay.input_mode || 'ocr';
 const intervalMs = String(process.env.OVERLAY_INTERVAL_MS || overlay.interval_ms || '900');
 const ocrLang = process.env.OVERLAY_OCR_LANG || overlay.ocr_lang || 'en';
-const dedupeWindowMs = String(process.env.OVERLAY_DEDUPE_WINDOW_MS || overlay.dedupe_window_ms || '1200');
 const tesseractCmd = process.env.TESSERACT_CMD || ocr.tesseract_cmd || '';
 
 const backendArgs = [
@@ -37,8 +36,7 @@ const backendArgs = [
   '--port', wsPort,
   '--input-mode', inputMode,
   '--interval-ms', intervalMs,
-  '--ocr-lang', ocrLang,
-  '--dedupe-window-ms', dedupeWindowMs
+  '--ocr-lang', ocrLang
 ];
 
 const backendPython = fs.existsSync(venvPython) 

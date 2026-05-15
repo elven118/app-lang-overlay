@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src 'self'; script-src 'self';" />
+  <title>App Lang Overlay Control</title>
+  <link rel="stylesheet" href="control.css" />
+</head>
+<body>
+  <main class="panel">
+    <h1>App Lang Overlay</h1>
+    <p id="status-line">Loading...</p>
+    <div class="actions">
+      <button id="btn-pick-region" type="button">Pick Capture Region</button>
+      <button id="btn-toggle-clickthrough" type="button">Toggle Clickthrough</button>
+      <button id="btn-toggle-settings" type="button">Toggle Overlay Settings</button>
+    </div>
+    <p class="hint">Use the native menu bar for full actions.</p>
+  </main>
+  <script src="./control.js"></script>
+</body>
+</html>

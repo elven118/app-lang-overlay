@@ -23,7 +23,6 @@ WebSocket payloads from backend to overlay:
   "translated_text": "Good morning.",
   "lang_src": "ja",
   "lang_dst": "en",
-  "confidence": 0.95,
   "dedupe_key": "おはよう。:Good morning.",
   "hide_after_ms": 2200
 }

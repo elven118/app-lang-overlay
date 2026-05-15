@@ -59,6 +59,7 @@ const rendererConfig = {
   entry: {
     "renderer/overlay/overlay": "./src/renderer/overlay/overlay.ts",
     "renderer/picker/picker": "./src/renderer/picker/picker.ts",
+    "renderer/control/control": "./src/renderer/control/control.ts",
   },
   output: {
     ...baseConfig.output,

@@ -18,14 +18,5 @@ def normalize_for_compare(text: str) -> str:
     reduced = re.sub(r"\s+", " ", reduced).strip()
     return reduced
 
-
-def confidence_for_text(text: str) -> float:
-    if not text:
-        return 0.0
-    alpha = sum(1 for ch in text if ch.isalnum())
-    ratio = alpha / max(len(text), 1)
-    return round(min(max(ratio, 0.2), 0.99), 2)
-
-
 def dedupe_key(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]

@@ -33,7 +33,6 @@ const DEFAULT_SETTINGS: OverlaySettings = {
   translateColor: "#ffd166",
   background: "rgba(0,0,0,0.35)",
   autoHideMs: 5000,
-  dedupeWindowMs: 1200,
   clickthrough: true,
   ocrLang: "en",
 };
@@ -126,7 +125,6 @@ function normalizeOverlaySettings(
     ),
     lineGap: Math.max(0, Math.round(asFiniteNumber(raw.lineGap, DEFAULT_SETTINGS.lineGap))),
     autoHideMs: Math.max(300, Math.round(asFiniteNumber(raw.autoHideMs, DEFAULT_SETTINGS.autoHideMs))),
-    dedupeWindowMs: Math.max(0, Math.round(asFiniteNumber(raw.dedupeWindowMs, DEFAULT_SETTINGS.dedupeWindowMs))),
     clickthrough: typeof raw.clickthrough === "boolean" ? raw.clickthrough : DEFAULT_SETTINGS.clickthrough,
     ocrLang: String(raw.ocrLang || DEFAULT_SETTINGS.ocrLang),
     background,
@@ -141,7 +139,10 @@ const wsUrl = process.env.OVERLAY_WS_URL || "ws://127.0.0.1:8765";
 const repoRoot = path.resolve(__dirname, "../..");
 
 let overlayWindow: BrowserWindow | null = null;
+let controlWindow: BrowserWindow | null = null;
 let selectionWindows: SelectionWindow[] = [];
+let appMenu: Menu | null = null;
+let quitting = false;
 
 function getTargetDisplay(profile: Record<string, unknown>): Display {
   const displayId = profile.capture_display_id;
@@ -365,11 +366,94 @@ function createOverlayWindow(): BrowserWindow {
   win.loadFile(path.join(__dirname, "renderer/overlay/index.html"), {
     query: { ws: wsUrl },
   });
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.key === "Escape") {
+      event.preventDefault();
+      win.webContents.send("overlay:close-panel");
+    }
+  });
 
   const settings = getOverlaySettings(gameId);
   win.setIgnoreMouseEvents(settings.clickthrough, { forward: true });
 
   return win;
+}
+
+function createControlWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 420,
+    height: 320,
+    minWidth: 380,
+    minHeight: 280,
+    title: "App Lang Overlay",
+    autoHideMenuBar: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload/index.js"),
+    },
+  });
+
+  win.loadFile(path.join(__dirname, "renderer/control/index.html"));
+
+  if (appMenu && process.platform !== "darwin") {
+    win.setMenu(appMenu);
+    win.setMenuBarVisibility(true);
+  }
+
+  win.on("close", (event) => {
+    if (quitting) {
+      return;
+    }
+    event.preventDefault();
+    if (process.platform === "darwin") {
+      win.hide();
+    } else {
+      win.minimize();
+    }
+  });
+
+  return win;
+}
+
+function showControlWindow(): void {
+  if (!controlWindow || controlWindow.isDestroyed()) {
+    controlWindow = createControlWindow();
+  }
+  if (controlWindow.isMinimized()) {
+    controlWindow.restore();
+  }
+  controlWindow.show();
+  controlWindow.focus();
+}
+
+function hideControlWindow(): void {
+  if (!controlWindow || controlWindow.isDestroyed()) {
+    return;
+  }
+  controlWindow.hide();
+}
+
+function toggleControlWindow(): void {
+  if (!controlWindow || controlWindow.isDestroyed()) {
+    controlWindow = createControlWindow();
+    showControlWindow();
+    return;
+  }
+  if (!controlWindow.isVisible() || controlWindow.isMinimized()) {
+    showControlWindow();
+    return;
+  }
+  hideControlWindow();
+}
+
+function toggleOverlayPanel(): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.show();
+    overlayWindow.focus();
+    overlayWindow.webContents.send("overlay:toggle-panel");
+  }
 }
 
 function refreshOverlayWindowForProfile(): void {
@@ -422,6 +506,16 @@ async function openRegionPickerWindows() {
 
     win.loadFile(path.join(__dirname, "renderer/picker/index.html"));
 
+    if (displays.length === 1) {
+      win.webContents.once("did-finish-load", () => {
+        win.webContents.send("picker:start-drag", {
+          originX: display.bounds.x,
+          originY: display.bounds.y,
+          captureScaleFactor: process.platform === "win32" ? (display.scaleFactor || 1) : 1,
+        });
+      });
+    }
+
     win.webContents.on("before-input-event", (_event, input) => {
       if (input.key === "Escape") {
         closeRegionPickerWindows();
@@ -444,28 +538,6 @@ function closeRegionPickerWindows(): void {
   });
   selectionWindows = [];
 }
-
-ipcMain.on("display-selected", (event) => {
-  const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
-  if (!selectedWindow || selectedWindow.isDestroyed()) {
-    return;
-  }
-
-  selectionWindows.forEach((win) => {
-    if (win !== selectedWindow && !win.isDestroyed()) {
-      win.close();
-    }
-  });
-
-  selectionWindows = [selectedWindow];
-  selectedWindow.focus();
-  const bounds = selectedWindow.getBounds();
-  selectedWindow.webContents.send("picker:start-drag", {
-    originX: bounds.x,
-    originY: bounds.y,
-    captureScaleFactor: process.platform === "win32" ? (selectedWindow.display?.scaleFactor ?? 1) : 1,
-  });
-});
 
 ipcMain.handle("overlay:get-settings", () => getOverlaySettings(gameId));
 
@@ -492,6 +564,54 @@ ipcMain.handle("overlay:copy-text", (_event, text: string) => {
 ipcMain.handle("overlay:pick-region", async () => {
   await openRegionPickerWindows();
   return { status: "started" };
+});
+ipcMain.handle("control:toggle-window", () => {
+  toggleControlWindow();
+  return Boolean(controlWindow && !controlWindow.isDestroyed() && controlWindow.isVisible());
+});
+ipcMain.handle("control:show-window", () => {
+  showControlWindow();
+  return true;
+});
+ipcMain.handle("control:hide-window", () => {
+  hideControlWindow();
+  return false;
+});
+ipcMain.handle("control:get-visible", () => {
+  return Boolean(controlWindow && !controlWindow.isDestroyed() && controlWindow.isVisible());
+});
+ipcMain.handle("control:toggle-overlay-panel", () => {
+  toggleOverlayPanel();
+  return true;
+});
+ipcMain.handle("control:toggle-clickthrough", () => {
+  const settings = getOverlaySettings(gameId);
+  const next = !settings.clickthrough;
+  saveOverlaySettings(gameId, { ...settings, clickthrough: next });
+  applyClickthrough(next);
+  return next;
+});
+
+ipcMain.on("picker:selected", (event) => {
+  const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
+  if (!selectedWindow || selectedWindow.isDestroyed()) {
+    return;
+  }
+
+  selectionWindows.forEach((win) => {
+    if (win !== selectedWindow && !win.isDestroyed()) {
+      win.close();
+    }
+  });
+
+  selectionWindows = [selectedWindow];
+  selectedWindow.focus();
+  const bounds = selectedWindow.getBounds();
+  selectedWindow.webContents.send("picker:start-drag", {
+    originX: bounds.x,
+    originY: bounds.y,
+    captureScaleFactor: process.platform === "win32" ? (selectedWindow.display?.scaleFactor ?? 1) : 1,
+  });
 });
 
 ipcMain.handle("picker:submit", (event, region: CaptureRegion) => {
@@ -540,6 +660,12 @@ const template: MenuItemConstructorOptions[] = [
           applyClickthrough(next);
         },
       },
+      {
+        label: "Toggle Settings Panel",
+        click: () => {
+          toggleOverlayPanel();
+        },
+      },
       { type: "separator" },
       {
         role: "quit",
@@ -550,6 +676,11 @@ const template: MenuItemConstructorOptions[] = [
 ];
 
 app.whenReady().then(() => {
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    app.dock?.show();
+  }
+
   ensureProfileExists(gameId);
 
   globalShortcut.register("CommandOrControl+Shift+R", () => {
@@ -558,9 +689,7 @@ app.whenReady().then(() => {
     });
   });
   globalShortcut.register("CommandOrControl+Shift+P", () => {
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.webContents.send("overlay:toggle-panel");
-    }
+    toggleOverlayPanel();
   });
   globalShortcut.register("CommandOrControl+Shift+C", () => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -568,10 +697,12 @@ app.whenReady().then(() => {
     }
   });
 
-  const menu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(menu);
+  appMenu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(appMenu);
 
   overlayWindow = createOverlayWindow();
+  controlWindow = createControlWindow();
+  showControlWindow();
 
   if (!hasCaptureRegion(gameId)) {
     openRegionPickerWindows().catch((err) => {
@@ -580,6 +711,11 @@ app.whenReady().then(() => {
   }
 });
 
+app.on("activate", () => {
+  showControlWindow();
+});
+
 app.on("will-quit", () => {
+  quitting = true;
   globalShortcut.unregisterAll();
 });

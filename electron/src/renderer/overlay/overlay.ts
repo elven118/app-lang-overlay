@@ -6,25 +6,18 @@ type SubtitleEvent = {
   translated_text: string | null;
   lang_src: string;
   lang_dst: string;
-  confidence: number;
   dedupe_key: string;
-  hide_after_ms?: number;
+  hide_after_ms: number;
 };
 
-type ClearEvent = {
-  type: 'clear';
+type SubtitleHideEvent = {
+  type: 'subtitle_hide';
   profile: string;
   timestamp: number;
   reason?: string;
 };
 
-type HealthEvent = {
-  type: 'health';
-  timestamp: number;
-  status?: string;
-};
-
-type OverlayEvent = SubtitleEvent | ClearEvent | HealthEvent;
+type OverlayEvent = SubtitleEvent | SubtitleHideEvent;
 
 import type { CaptureRegion, OverlaySettings } from '../../shared/types';
 
@@ -45,7 +38,6 @@ const translateColorInput = document.getElementById('setting-translate-color') a
 const backgroundColorInput = document.getElementById('setting-background-color') as HTMLInputElement;
 const backgroundAlphaInput = document.getElementById('setting-background-alpha') as HTMLInputElement;
 const autoHideInput = document.getElementById('setting-autohide') as HTMLInputElement;
-const dedupeInput = document.getElementById('setting-dedupe') as HTMLInputElement;
 const ocrLangInput = document.getElementById('setting-ocr-lang') as HTMLSelectElement;
 const clickthroughInput = document.getElementById('setting-clickthrough') as HTMLInputElement;
 
@@ -56,7 +48,6 @@ let gameId = 'demo';
 let panelVisible = false;
 let latestSourceText = '';
 let latestTranslatedText = '';
-const dedupeSeen = new Map<string, number>();
 
 type DragState =
   | {
@@ -152,7 +143,7 @@ function setStyle(nextSettings: OverlaySettings): void {
   applyPlacement(nextSettings);
 }
 
-function show(sourceText: string, translatedText: string | null, hideAfterMs: number | undefined): void {
+function show(sourceText: string, translatedText: string | null, hideAfterMs: number): void {
   latestSourceText = sourceText || '';
   latestTranslatedText = translatedText || '';
   if (sourceEl) sourceEl.textContent = sourceText;
@@ -160,7 +151,11 @@ function show(sourceText: string, translatedText: string | null, hideAfterMs: nu
   box.classList.remove('hidden');
   box.classList.add('visible');
   if (hideTimer) clearTimeout(hideTimer);
-  hideTimer = setTimeout(() => hide(), hideAfterMs || settings.autoHideMs);
+  if (hideAfterMs >= 0) {
+    hideTimer = setTimeout(() => hide(), hideAfterMs);
+  } else {
+    hideTimer = undefined;
+  }
   applyPlacement(settings);
 }
 
@@ -235,7 +230,6 @@ function syncPanelFromSettings(): void {
   backgroundColorInput.value = bg.colorHex;
   backgroundAlphaInput.value = String(bg.alphaPercent);
   autoHideInput.value = String(settings.autoHideMs);
-  dedupeInput.value = String(settings.dedupeWindowMs);
   ocrLangInput.value = settings.ocrLang || 'en';
   clickthroughInput.checked = settings.clickthrough;
 }
@@ -252,7 +246,6 @@ function parsePanelSettings(): OverlaySettings {
     translateColor: translateColorInput.value || settings.translateColor,
     background: composeBackground(),
     autoHideMs: Number(autoHideInput.value || settings.autoHideMs),
-    dedupeWindowMs: Number(dedupeInput.value || settings.dedupeWindowMs),
     ocrLang: ocrLangInput.value || settings.ocrLang || 'en',
     clickthrough: clickthroughInput.checked,
   };
@@ -375,13 +368,8 @@ function connect(): void {
 
     if (payload.type === 'subtitle') {
       if (payload.profile !== gameId) return;
-      const seenAt = dedupeSeen.get(payload.dedupe_key);
-      if (typeof seenAt === 'number' && (payload.timestamp - seenAt) * 1000 <= settings.dedupeWindowMs) {
-        return;
-      }
-      dedupeSeen.set(payload.dedupe_key, payload.timestamp);
       show(payload.source_text, payload.translated_text, payload.hide_after_ms);
-    } else if (payload.type === 'clear') {
+    } else if (payload.type === 'subtitle_hide') {
       if (payload.profile !== gameId) return;
       hide();
     }
@@ -407,7 +395,6 @@ function installPanelEvents(): void {
   backgroundColorInput.addEventListener('input', persist);
   backgroundAlphaInput.addEventListener('input', persist);
   autoHideInput.addEventListener('change', persist);
-  dedupeInput.addEventListener('change', persist);
   ocrLangInput.addEventListener('change', persist);
   clickthroughInput.addEventListener('change', persist);
 
@@ -416,6 +403,11 @@ function installPanelEvents(): void {
   });
   window.overlayApi.onCopyCurrent(() => {
     void copyCurrentText();
+  });
+  window.overlayApi.onClosePanel(() => {
+    if (panelVisible) {
+      void togglePanel(false);
+    }
   });
 
   box.addEventListener('mousedown', startDrag);

@@ -15,7 +15,7 @@ import subprocess
 import time
 from typing import AsyncIterator
 
-from .textproc import confidence_for_text, dedupe_key
+from .textproc import dedupe_key
 
 # ---------------------------------------------------------------------------
 # AppleScript: traverse the Live Captions window's full accessibility tree and
@@ -89,7 +89,6 @@ async def ax_stream(game: str, interval_ms: int) -> AsyncIterator[dict]:
             "translated_text": "",
             "lang_src": "auto",
             "lang_dst": "en",
-            "confidence": confidence_for_text(text),
             "dedupe_key": dedupe_key(text),
             "hide_after_ms": 5000,
         }

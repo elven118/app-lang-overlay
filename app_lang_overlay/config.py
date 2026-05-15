@@ -81,3 +81,25 @@ def get_ocr_lang(game: str, default_lang: str = "en") -> str:
     if value:
         return value
     return default_lang
+
+
+def get_overlay_auto_hide_ms(game: str, default_ms: int = -1) -> int:
+    p = profile_path(game)
+    if p.exists():
+        try:
+            profile = json.loads(p.read_text(encoding="utf-8"))
+            overlay_settings = profile.get("overlay_settings")
+            if isinstance(overlay_settings, dict):
+                value = int(overlay_settings.get("autoHideMs", default_ms))
+                return value
+        except Exception:
+            pass
+
+    overlay_cfg = load_runtime_overlay_config()
+    value = overlay_cfg.get("auto_hide_ms")
+    if value is None:
+        return default_ms
+    try:
+        return int(value)
+    except Exception:
+        return default_ms

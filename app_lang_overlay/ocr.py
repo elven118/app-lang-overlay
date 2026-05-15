@@ -12,7 +12,7 @@ from PIL import Image
 from .config import get_ocr_lang, profile_path, try_load_capture_region
 from .text_det import OnnxTextDetector
 from .text_rec import OnnxTextRecognizer
-from .textproc import confidence_for_text, dedupe_key
+from .textproc import dedupe_key
 
 
 def _crop_rotated_text_region(image_bgr: np.ndarray, box: np.ndarray) -> np.ndarray | None:
@@ -87,6 +87,21 @@ def _extract_text_crops(
     return crops
 
 
+def _empty_subtitle_event(game: str) -> dict:
+    now = time.time()
+    return {
+        "type": "subtitle",
+        "profile": game,
+        "timestamp": now,
+        "source_text": "",
+        "translated_text": "",
+        "lang_src": "auto",
+        "lang_dst": "en",
+        "dedupe_key": dedupe_key(""),
+        "hide_after_ms": 5000,
+    }
+
+
 async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterator[dict]:
     region: dict | None = None
     interval_s = max(interval_ms, 100) / 1000
@@ -126,19 +141,28 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
                 active_ocr_lang = current_lang
                 print(f"[overlay-backend] OCR language switched to: {active_ocr_lang}")
 
-            ocr_rec = get_ocr_for_lang(active_ocr_lang)
-
             shot = sct.grab(region)
             image = Image.frombytes("RGB", shot.size, shot.rgb)
             image_rgb = np.array(image)
-            image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
             det_results = ocr_det.predict(image)
+            if not det_results:
+                yield _empty_subtitle_event(game)
+                await asyncio.sleep(interval_s)
+                continue
+
+            image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
             crops = _extract_text_crops(image_bgr, det_results)
+            if not crops:
+                yield _empty_subtitle_event(game)
+                await asyncio.sleep(interval_s)
+                continue
+
+            ocr_rec = get_ocr_for_lang(active_ocr_lang)
             sentence_results = ocr_rec.predict_sentences(crops)
 
             text = "\n".join(item["text"] for item in sentence_results if item.get("text"))
-            
+
             yield {
                 "type": "subtitle",
                 "profile": game,
@@ -147,7 +171,6 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
                 "translated_text": "",
                 "lang_src": "auto",
                 "lang_dst": "en",
-                "confidence": confidence_for_text(text),
                 "dedupe_key": dedupe_key(text),
                 "hide_after_ms": 5000,
             }

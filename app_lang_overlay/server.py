@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import traceback
+from collections import OrderedDict
 from typing import Iterable
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
 from .ax_source import ax_stream
+from .config import get_overlay_auto_hide_ms
 from .llm import LocalTranslator
 from .ocr import ocr_stream
 from .textproc import dedupe_key, normalize_for_compare
@@ -36,7 +38,6 @@ def fake_stream(game: str) -> Iterable[dict]:
             "translated_text": translated,
             "lang_src": "auto",
             "lang_dst": "en",
-            "confidence": 0.95,
             "dedupe_key": f"{source}:{translated}",
             "hide_after_ms": 5000,
         }
@@ -49,7 +50,7 @@ async def run_overlay_backend(
     interval_ms: int,
     input_mode: str,
     ocr_lang: str,
-    dedupe_window_ms: int,
+    auto_hide_ms: int,
 ) -> None:
     clients: set = set()
     stop = asyncio.Event()
@@ -81,8 +82,11 @@ async def run_overlay_backend(
 
     async def publisher() -> None:
         last_emitted_compare = ""
-        last_emitted_at = 0.0
         blank_since = 0.0
+        hide_sent_for_blank = False
+        overlay_visible = False
+        translation_by_key: OrderedDict[str, str] = OrderedDict()
+        translation_cache_limit = 64
         last_empty_notice_at = 0.0
 
         if input_mode == "fake":
@@ -110,17 +114,26 @@ async def run_overlay_backend(
                     text = event["source_text"]
                     now = float(event["timestamp"])
                     compare_text = normalize_for_compare(text)
+                    current_auto_hide_ms = get_overlay_auto_hide_ms(game, default_ms=auto_hide_ms)
 
                     if not text:
                         if blank_since == 0.0:
                             blank_since = now
-                        if now - blank_since >= 1.0:
+                        hide_timeout_s = max(interval_ms + max(current_auto_hide_ms, 0), 0) / 1000.0
+                        if (
+                            current_auto_hide_ms >= 0
+                            and overlay_visible
+                            and not hide_sent_for_blank
+                            and now - blank_since >= hide_timeout_s
+                        ):
+                            hide_sent_for_blank = True
+                            overlay_visible = False
                             await publish(
                                 {
-                                    "type": "clear",
+                                    "type": "subtitle_hide",
                                     "profile": game,
                                     "timestamp": now,
-                                    "reason": "empty_ocr",
+                                    "reason": "no_text_timeout",
                                 }
                             )
                         if input_mode == "ocr" and now - last_empty_notice_at >= 5.0:
@@ -134,26 +147,34 @@ async def run_overlay_backend(
                                     "translated_text": "",
                                     "lang_src": "auto",
                                     "lang_dst": "en",
-                                    "confidence": 0.0,
                                     "dedupe_key": "ocr-empty-notice",
-                                    "hide_after_ms": 1500,
+                                    "hide_after_ms": -1,
                                 }
                             )
                         continue
 
                     blank_since = 0.0
+                    hide_sent_for_blank = False
 
-                    same_text = compare_text == last_emitted_compare
-                    in_window = (now - last_emitted_at) * 1000 < max(dedupe_window_ms, 0)
-                    if same_text and in_window:
+                    if compare_text == last_emitted_compare:
                         continue
 
                     last_emitted_compare = compare_text
-                    last_emitted_at = now
-                    translated = await translator.translate(text)
+                    source_key = dedupe_key(text)
+                    cached = translation_by_key.get(source_key)
+                    if cached is not None:
+                        translated = cached
+                        translation_by_key.move_to_end(source_key)
+                    else:
+                        translated = await translator.translate(text)
+                        translation_by_key[source_key] = translated
+                        if len(translation_by_key) > translation_cache_limit:
+                            translation_by_key.popitem(last=False)
                     event["source_text"] = text
                     event["translated_text"] = translated
-                    event["dedupe_key"] = dedupe_key(translated or text)
+                    event["dedupe_key"] = source_key
+                    event["hide_after_ms"] = -1
+                    overlay_visible = True
                     await publish(event)
             except Exception as exc:
                 print(f"[overlay-backend] OCR loop error: {exc}")

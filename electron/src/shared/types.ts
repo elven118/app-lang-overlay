@@ -30,7 +30,6 @@ export type OverlaySettings = {
   translateColor: string;
   background: string;
   autoHideMs: number;
-  dedupeWindowMs: number;
   clickthrough: boolean;
   ocrLang: string;
   captureRegion?: CaptureRegion;
