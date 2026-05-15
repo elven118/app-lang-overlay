@@ -1,5 +1,6 @@
 {
   "llm": {
+    "mode": "local",
     "model_path": "./models/HY-MT1.5-7B-Q4_K_M.gguf",
     "fallbacks": [],
     "n_gpu_layers": -1,
@@ -10,6 +11,7 @@
     "chat_format": null
   },
   "overlay": {
-    "input_mode": "ocr"
+    "input_mode": "ocr",
+    "poll_ms": 200
   }
 }

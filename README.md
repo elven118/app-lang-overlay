@@ -5,8 +5,23 @@ Bilingual subtitle overlay for language learning:
 - Bottom line: translated subtitle text
 
 Architecture:
-- Python backend (`overlay-backend`): OCR/file/stdin ingestion + dedupe + local LLM translation + WebSocket events
-- Electron frontend (TypeScript + ES2022): transparent always-on-top overlay window
+- `app_lang_overlay`: Python backend (OCR/accessibility ingestion + dedupe + translation + WebSocket events)
+- `electron`: Electron frontend overlay (always-on-top transparent window)
+- `services/llm_server`: standalone remote LLM translation service (HTTP)
+
+## Big-Tech Style Project Layout
+
+```text
+app-lang-overlay/
+  app_lang_overlay/         # core backend domain logic
+  electron/                 # frontend app
+  services/
+    llm_server/             # deployable translation service
+  scripts/                  # operational entrypoints
+  config/                   # runtime config
+  data/                     # runtime state (profiles)
+  models/                   # local model artifacts
+```
 
 ## Event Contract (V1)
 
@@ -28,18 +43,7 @@ WebSocket payloads from backend to overlay:
 }
 ```
 
-`clear` event:
-
-```json
-{
-  "type": "clear",
-  "profile": "demo",
-  "timestamp": 1770000002.0,
-  "reason": "timeout"
-}
-```
-
-## 1) Run Electron overlay
+## 1) Run Electron overlay only
 
 ```bash
 cd electron
@@ -54,13 +58,58 @@ cd electron
 npm run dev
 ```
 
-`npm run dev` starts:
-- Python OCR subtitle backend on localhost WebSocket
-- Electron overlay window (renders 2-line subtitles)
-- Global picker shortcut: `Cmd/Ctrl + Shift + R`
+## 3) Run standalone LLM server on another PC
 
-Profile flow:
-1. Select profile by `GAME_ID` (or default `demo`).
-2. If profile file does not exist, it is auto-created.
-3. If capture region is missing, picker opens automatically.
-4. OCR backend waits in standby and starts streaming immediately after region is saved.
+On the high-end PC:
+
+```bash
+python -m services.llm_server.server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf
+```
+
+Optional API key:
+
+```bash
+python -m services.llm_server.server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf --api-key YOUR_SECRET
+```
+
+Endpoints:
+- `GET /health`
+- `POST /translate`
+
+`POST /translate` request body:
+
+```json
+{
+  "text": "おはよう。",
+  "target_lang": "English"
+}
+```
+
+## 4) Connect local backend to remote LLM server
+
+Set `config/runtime.json` on your overlay PC:
+
+```json
+{
+  "llm": {
+    "mode": "remote",
+    "remote_url": "http://HIGH_END_PC_IP:8790/translate",
+    "remote_api_key": "",
+    "remote_timeout_s": 20,
+    "max_tokens": 512
+  },
+  "overlay": {
+    "input_mode": "ocr",
+    "poll_ms": 200
+  }
+}
+```
+
+To stay fully local on stronger PCs, switch back:
+
+```json
+"llm": {
+  "mode": "local",
+  "model_path": "./models/HY-MT1.5-7B-Q4_K_M.gguf"
+}
+```
