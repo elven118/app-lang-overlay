@@ -9,6 +9,8 @@ import mss
 import numpy as np
 from PIL import Image
 
+from app_lang_overlay.kanji_converter import KanjiConverter
+
 from .config import get_ocr_lang, profile_path, try_load_capture_region
 from .text_det import OnnxTextDetector
 from .text_rec import OnnxTextRecognizer
@@ -94,6 +96,7 @@ def _empty_subtitle_event(game: str) -> dict:
         "profile": game,
         "timestamp": now,
         "source_text": "",
+        "formatted_text": "",
         "translated_text": "",
         "lang_src": "auto",
         "lang_dst": "en",
@@ -108,6 +111,7 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
     region_log_cooldown_s = 2.0
     last_region_log_at = 0.0
     active_ocr_lang = (ocr_lang or "en").strip() or "en"
+    kanji_converter = None
 
     ocr_det = OnnxTextDetector()
     ocr_rec_instances: dict[str, OnnxTextRecognizer] = {}
@@ -139,6 +143,7 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
             current_lang = (get_ocr_lang(game, default_lang=ocr_lang) or "en").strip() or "en"
             if current_lang != active_ocr_lang:
                 active_ocr_lang = current_lang
+                kanji_converter = KanjiConverter() if active_ocr_lang == "japan" else None
                 print(f"[overlay-backend] OCR language switched to: {active_ocr_lang}")
 
             shot = sct.grab(region)
@@ -168,6 +173,7 @@ async def ocr_stream(game: str, interval_ms: int, ocr_lang: str) -> AsyncIterato
                 "profile": game,
                 "timestamp": time.time(),
                 "source_text": text,
+                "formatted_text": kanji_converter.kanji_to_hiragana(text) if kanji_converter else None,
                 "translated_text": "",
                 "lang_src": "auto",
                 "lang_dst": "en",

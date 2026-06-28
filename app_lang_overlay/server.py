@@ -9,8 +9,10 @@ from typing import Iterable
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
+from app_lang_overlay.kanji_converter import KanjiConverter
+
 from .ax_source import ax_stream
-from .config import get_overlay_auto_hide_ms
+from .config import get_ocr_lang, get_overlay_auto_hide_ms
 from .llm import LocalTranslator
 from .ocr import ocr_stream
 from .textproc import dedupe_key, normalize_for_compare
@@ -26,8 +28,10 @@ def fake_stream(game: str) -> Iterable[dict]:
         ("うん、行こう。", ""),
     ]
     idx = 0
+    kanji_converter = KanjiConverter()
     while True:
         source, translated = samples[idx % len(samples)]
+        
         idx += 1
         now = time.time()
         yield {
@@ -35,6 +39,7 @@ def fake_stream(game: str) -> Iterable[dict]:
             "profile": game,
             "timestamp": now,
             "source_text": source,
+            "formatted_text": kanji_converter.kanji_to_hiragana(source),
             "translated_text": translated,
             "lang_src": "auto",
             "lang_dst": "en",

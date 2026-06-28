@@ -15,6 +15,9 @@ import subprocess
 import time
 from typing import AsyncIterator
 
+from app_lang_overlay.config import get_ocr_lang
+from app_lang_overlay.kanji_converter import KanjiConverter
+
 from .textproc import dedupe_key
 
 # ---------------------------------------------------------------------------
@@ -73,6 +76,7 @@ async def ax_stream(game: str, interval_ms: int) -> AsyncIterator[dict]:
     loop = asyncio.get_event_loop()
     last_warn_at = 0.0
     warn_cooldown_s = 5.0
+    kanji_converter = KanjiConverter() if get_ocr_lang(game) == "japan" else None
 
     while True:
         text = await loop.run_in_executor(None, _read_live_captions_sync)
@@ -86,6 +90,7 @@ async def ax_stream(game: str, interval_ms: int) -> AsyncIterator[dict]:
             "profile": game,
             "timestamp": now,
             "source_text": text,
+            "formatted_text": kanji_converter.kanji_to_hiragana(text) if kanji_converter else None,
             "translated_text": "",
             "lang_src": "auto",
             "lang_dst": "en",

@@ -3,6 +3,7 @@ type SubtitleEvent = {
   profile: string;
   timestamp: number;
   source_text: string;
+  formatted_text?: string;
   translated_text: string | null;
   lang_src: string;
   lang_dst: string;
@@ -143,10 +144,11 @@ function setStyle(nextSettings: OverlaySettings): void {
   applyPlacement(nextSettings);
 }
 
-function show(sourceText: string, translatedText: string | null, hideAfterMs: number): void {
+function show(sourceText: string, translatedText: string | null, hideAfterMs: number, formattedText?: string): void {
   latestSourceText = sourceText || '';
   latestTranslatedText = translatedText || '';
-  if (sourceEl) sourceEl.textContent = sourceText;
+  if (sourceEl) sourceEl.innerHTML = formattedText ? formattedText : '<span>' + (sourceText || '') + '</span>';
+  // if (sourceEl) sourceEl.textContent = sourceText;
   translatedEl.textContent = translatedText || '';
   box.classList.remove('hidden');
   box.classList.add('visible');
@@ -368,7 +370,7 @@ function connect(): void {
 
     if (payload.type === 'subtitle') {
       if (payload.profile !== gameId) return;
-      show(payload.source_text, payload.translated_text, payload.hide_after_ms);
+      show(payload.source_text, payload.translated_text, payload.hide_after_ms, payload.formatted_text);
     } else if (payload.type === 'subtitle_hide') {
       if (payload.profile !== gameId) return;
       hide();
