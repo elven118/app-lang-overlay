@@ -136,7 +136,7 @@ function normalizeOverlaySettings(
 
 const gameId = process.env.GAME_ID || "demo";
 const wsUrl = process.env.OVERLAY_WS_URL || "ws://127.0.0.1:8765";
-const repoRoot = path.resolve(__dirname, "../..");
+const repoRoot = path.resolve(__dirname, "../../..");
 
 let overlayWindow: BrowserWindow | null = null;
 let controlWindow: BrowserWindow | null = null;
