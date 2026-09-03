@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
+const backendRoot = path.join(repoRoot, 'services', 'backend');
+const backendSource = path.join(backendRoot, 'src');
 const venvPython = process.platform === 'win32' 
   ? path.join(repoRoot, '.venv', 'Scripts', 'python.exe')
   : path.join(repoRoot, '.venv', 'bin', 'python');
@@ -24,19 +26,10 @@ const ocr = runtime.ocr || {};
 const game = process.env.GAME_ID || overlay.game_id || 'demo';
 const wsHost = process.env.OVERLAY_WS_HOST || overlay.ws_host || '127.0.0.1';
 const wsPort = String(process.env.OVERLAY_WS_PORT || overlay.ws_port || '8765');
-const inputMode = process.env.OVERLAY_INPUT_MODE || overlay.input_mode || 'ocr';
-const pollMs = String(process.env.OVERLAY_POLL_MS || overlay.poll_ms || '900');
-const ocrLang = process.env.OVERLAY_OCR_LANG || overlay.ocr_lang || 'en';
 const tesseractCmd = process.env.TESSERACT_CMD || ocr.tesseract_cmd || '';
 
 const backendArgs = [
-  '-m', 'app_lang_overlay.cli', 'overlay-backend',
-  '--game', game,
-  '--host', wsHost,
-  '--port', wsPort,
-  '--input-mode', inputMode,
-  '--poll-ms', pollMs,
-  '--ocr-lang', ocrLang
+  '-m', 'overlay_backend'
 ];
 
 const backendPython = fs.existsSync(venvPython) 
@@ -45,7 +38,14 @@ const backendPython = fs.existsSync(venvPython)
 
 const backend = spawn(backendPython, backendArgs, {
   stdio: 'inherit',
-  cwd: repoRoot
+  cwd: repoRoot,
+  env: {
+    ...process.env,
+    PYTHONPATH: [backendSource, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+    OVERLAY_PROJECT_ROOT: repoRoot,
+    OVERLAY_BACKEND_HOST: wsHost,
+    OVERLAY_BACKEND_PORT: wsPort
+  }
 });
 
 const electronEnv = { ...process.env };
@@ -59,7 +59,7 @@ const electron = spawn('npx', ['electron', '.'], {
     ...electronEnv,
     ...(tesseractCmd ? { TESSERACT_CMD: tesseractCmd } : {}),
     GAME_ID: game,
-    OVERLAY_WS_URL: `ws://${wsHost}:${wsPort}`
+    OVERLAY_WS_URL: `ws://${wsHost}:${wsPort}/v1/stream`
   }
 });
 

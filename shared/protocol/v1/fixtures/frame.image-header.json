@@ -1,0 +1,14 @@
+{
+  "type": "frame.image",
+  "sessionId": "desktop-a1",
+  "regionId": "dialogue-1",
+  "frameId": "44",
+  "capturedAtMs": 1787623201000,
+  "frameWidth": 1280,
+  "frameHeight": 240,
+  "mimeType": "image/jpeg",
+  "clientOcrDiagnostics": {
+    "provider": "none",
+    "reason": "server-ocr"
+  }
+}

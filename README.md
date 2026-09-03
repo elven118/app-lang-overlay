@@ -1,75 +1,79 @@
 # app-lang-overlay
 
-Bilingual subtitle overlay for language learning:
-- Top line: original subtitle text
-- Bottom line: translated subtitle text
+Cross-platform OCR translation overlay for books, articles, manga, and games.
 
 Architecture:
-- `app_lang_overlay`: Python backend (OCR/accessibility ingestion + dedupe + translation + WebSocket events)
-- `electron`: Electron frontend overlay (always-on-top transparent window)
-- `services/llm_server`: standalone remote LLM translation service (HTTP)
+- `services/backend`: Python ONNX OCR and translation backend
+- `apps/desktop`: Electron frontend overlay (always-on-top transparent window)
+- `apps/ios`: iPhone/iPad client project
 
 ## Big-Tech Style Project Layout
 
 ```text
 app-lang-overlay/
-  app_lang_overlay/         # core backend domain logic
-  electron/                 # frontend app
+  apps/
+    desktop/                # Electron frontend
+    ios/                    # iOS app
   services/
-    llm_server/             # deployable translation service
-  scripts/                  # operational entrypoints
+    backend/                # ONNX OCR, translation, and WebSocket service
+      src/overlay_backend/  # Python package
+      resources/ocr/        # OCR dictionaries
+      tests/                # backend tests and diagnostic tools
+  shared/protocol/v1/       # approved cross-platform protocol schema
   config/                   # runtime config
   data/                     # runtime state (profiles)
   models/                   # local model artifacts
 ```
 
-## Event Contract (V1)
+## Protocol V1
 
-WebSocket payloads from backend to overlay:
+The backend listens at `/v1/stream`. The canonical contract is
+`shared/protocol/v1/messages.schema.json`, with examples under
+`shared/protocol/v1/fixtures`.
 
-`subtitle` event:
+Clients submit device OCR with `frame.text` or an `ALO1` binary JPEG envelope
+with a `frame.image` header. The backend returns `translation.result` and
+`translation.clear` messages independently for each `regionId`.
 
-```json
-{
-  "type": "subtitle",
-  "profile": "demo",
-  "timestamp": 1770000000.25,
-  "source_text": "おはよう。",
-  "translated_text": "Good morning.",
-  "lang_src": "ja",
-  "lang_dst": "en",
-  "dedupe_key": "おはよう。:Good morning.",
-  "hide_after_ms": 2200
-}
-```
-
-## 1) Run Electron overlay only
+## Run the backend
 
 ```bash
-cd electron
+PYTHONPATH=services/backend/src python -m overlay_backend
+```
+
+The default endpoint is `ws://127.0.0.1:8765/v1/stream`. A bearer token is
+required when binding outside loopback, and an insecure LAN listener must also
+be explicitly enabled.
+
+## Run Electron overlay only
+
+```bash
+cd apps/desktop
 npm install
 npm run overlay
 ```
 
-## 2) One-command dev mode (backend + overlay)
+## Development launcher
 
 ```bash
-cd electron
+cd apps/desktop
 npm run dev
 ```
 
-## 3) Run standalone LLM server on another PC
+The desktop client protocol migration follows the backend phase.
+
+## Run standalone LLM server on another PC
 
 On the high-end PC:
 
 ```bash
-python -m services.llm_server.server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf
+PYTHONPATH=services/backend/src python -m overlay_backend.translation_server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf
 ```
 
 Optional API key:
 
 ```bash
-python -m services.llm_server.server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf --api-key YOUR_SECRET
+PYTHONPATH=services/backend/src python -m overlay_backend.translation_server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf --api-key YOUR_SECRET
 ```
 
 Endpoints:
@@ -85,7 +89,7 @@ Endpoints:
 }
 ```
 
-## 4) Connect local backend to remote LLM server
+## Connect the backend to a remote LLM server
 
 Set `config/runtime.json` on your overlay PC:
 
@@ -95,12 +99,7 @@ Set `config/runtime.json` on your overlay PC:
     "mode": "remote",
     "remote_url": "http://HIGH_END_PC_IP:8790/translate",
     "remote_api_key": "",
-    "remote_timeout_s": 20,
     "max_tokens": 512
-  },
-  "overlay": {
-    "input_mode": "ocr",
-    "poll_ms": 200
   }
 }
 ```

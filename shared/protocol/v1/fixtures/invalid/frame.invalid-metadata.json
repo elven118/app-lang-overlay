@@ -1,0 +1,10 @@
+{
+  "type": "frame.text",
+  "sessionId": "invalid",
+  "regionId": "invalid region id",
+  "frameId": "not-a-number",
+  "capturedAtMs": -1,
+  "frameWidth": 0,
+  "frameHeight": 0,
+  "blocks": []
+}

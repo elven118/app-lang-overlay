@@ -1,0 +1,34 @@
+{
+  "type": "translation.result",
+  "sessionId": "desktop-a1",
+  "regionId": "dialogue-1",
+  "frameId": "44",
+  "ocrProvider": "server-onnx",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "気をつけて。",
+      "translatedText": "",
+      "sourceReadingSegments": [
+        { "text": "気", "reading": "き" },
+        { "text": "をつけて。", "reading": null }
+      ],
+      "confidence": 0.91,
+      "bounds": {
+        "x": 0.08,
+        "y": 0.25,
+        "width": 0.42,
+        "height": 0.18
+      },
+      "readingOrder": 0
+    }
+  ],
+  "combinedSourceText": "気をつけて。",
+  "combinedTranslatedText": "小心。",
+  "dedupeKey": "51ac0c573b91",
+  "timingMs": {
+    "ocr": 47.8,
+    "translation": 102.4,
+    "total": 151.1
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "type": "server.ready",
+  "protocolVersion": 1,
+  "ocrProviders": ["server-onnx"]
+}

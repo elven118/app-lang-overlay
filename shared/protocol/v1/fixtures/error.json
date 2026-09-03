@@ -1,0 +1,9 @@
+{
+  "type": "error",
+  "code": "image_too_large",
+  "message": "The JPEG payload exceeds the 4 MiB limit.",
+  "retryable": false,
+  "sessionId": "desktop-a1",
+  "regionId": "dialogue-1",
+  "frameId": "46"
+}

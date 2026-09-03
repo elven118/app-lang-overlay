@@ -1,0 +1,23 @@
+{
+  "type": "frame.text",
+  "sessionId": "ios-a1",
+  "regionId": "screen",
+  "frameId": "42",
+  "capturedAtMs": 1787623200000,
+  "frameWidth": 1179,
+  "frameHeight": 2556,
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "今日は",
+      "confidence": 0.94,
+      "bounds": {
+        "x": 0.1,
+        "y": 0.2,
+        "width": 0.3,
+        "height": 0.08
+      },
+      "readingOrder": 0
+    }
+  ]
+}

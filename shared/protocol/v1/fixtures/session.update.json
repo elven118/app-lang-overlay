@@ -1,0 +1,9 @@
+{
+  "type": "session.update",
+  "requestId": "request-update-1",
+  "sessionId": "desktop-a1",
+  "settings": {
+    "sourceLanguage": "en",
+    "targetLanguage": "ja"
+  }
+}
