@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import {
   app,
@@ -11,12 +10,34 @@ import {
   MenuItemConstructorOptions,
   screen,
 } from "electron";
-import type { CaptureRegion, OverlaySettings } from "./shared/types";
+import { DesktopStream } from "./main/backend-client";
+import { DesktopCapture, type CaptureTarget } from "./main/capture";
+import { ProfileStore } from "./main/profile-store";
+import type {
+  CaptureMode,
+  CaptureRegion,
+  OverlaySettings,
+  ProfileState,
+  SourceLanguage,
+  StreamStatus,
+  TargetLanguage,
+  TranslationClear,
+  TranslationResult,
+} from "./shared/types";
 
 interface SelectionWindow extends BrowserWindow {
   display?: Display;
   displayIndex?: number;
 }
+
+const desktopRoot = path.resolve(__dirname, "..");
+try {
+  process.loadEnvFile(path.join(desktopRoot, ".env"));
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
+
+const repoRoot = path.resolve(__dirname, "../../..");
 
 const DEFAULT_SETTINGS: OverlaySettings = {
   placementMode: "free",
@@ -35,6 +56,11 @@ const DEFAULT_SETTINGS: OverlaySettings = {
   autoHideMs: 5000,
   clickthrough: true,
   ocrLang: "en",
+  targetLanguage: "zh-Hant",
+  mode: "one_large_area",
+  polling_ms: 900,
+  backendUrl: process.env.OVERLAY_BACKEND_URL || "ws://127.0.0.1:8765/v1/stream",
+  backendToken: process.env.OVERLAY_BACKEND_TOKEN || "",
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -63,6 +89,36 @@ function normalizeCaptureRegion(value: unknown): CaptureRegion | undefined {
   };
 }
 
+function normalizeCaptureRegions(value: unknown): CaptureRegion[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeCaptureRegion).filter((item): item is CaptureRegion => Boolean(item));
+}
+
+function normalizeSourceLanguage(value: unknown): SourceLanguage {
+  const aliases: Record<string, SourceLanguage> = {
+    japan: "ja",
+    ch: "zh-Hans",
+    chinese_cht: "zh-Hant",
+    korean: "ko",
+  };
+  const normalized = aliases[String(value || "")] || String(value || "");
+  return ["auto", "en", "ja", "ko", "zh-Hans", "zh-Hant"].includes(normalized)
+    ? normalized as SourceLanguage
+    : DEFAULT_SETTINGS.ocrLang;
+}
+
+function normalizeTargetLanguage(value: unknown): TargetLanguage {
+  return ["en", "zh-Hant", "ja"].includes(String(value || ""))
+    ? value as TargetLanguage
+    : DEFAULT_SETTINGS.targetLanguage;
+}
+
+function normalizeCaptureMode(value: unknown): CaptureMode {
+  return ["full_screen", "one_large_area", "multiple_regions"].includes(String(value || ""))
+    ? value as CaptureMode
+    : DEFAULT_SETTINGS.mode;
+}
+
 function createDefaultPlacement(
   width: number,
   captureRegion: CaptureRegion | undefined,
@@ -82,6 +138,7 @@ function normalizeOverlaySettings(
 ): OverlaySettings {
   const raw = ((rawValue || {}) as Partial<OverlaySettings>) || {};
   const captureRegion = normalizeCaptureRegion(raw.captureRegion);
+  const captureRegions = normalizeCaptureRegions(raw.captureRegions);
   const width = Math.max(1, Math.round(asFiniteNumber(raw.width, captureRegion?.width ?? DEFAULT_SETTINGS.width)));
 
   const defaults = createDefaultPlacement(width, captureRegion);
@@ -112,9 +169,8 @@ function normalizeOverlaySettings(
   const textColor = typeof raw.textColor === "string" ? raw.textColor : DEFAULT_SETTINGS.textColor;
   const translateColor = typeof raw.translateColor === "string" ? raw.translateColor : DEFAULT_SETTINGS.translateColor;
 
-  return {
+  const normalized = {
     ...DEFAULT_SETTINGS,
-    ...raw,
     placementMode,
     placement,
     width,
@@ -126,23 +182,44 @@ function normalizeOverlaySettings(
     lineGap: Math.max(0, Math.round(asFiniteNumber(raw.lineGap, DEFAULT_SETTINGS.lineGap))),
     autoHideMs: Math.max(300, Math.round(asFiniteNumber(raw.autoHideMs, DEFAULT_SETTINGS.autoHideMs))),
     clickthrough: typeof raw.clickthrough === "boolean" ? raw.clickthrough : DEFAULT_SETTINGS.clickthrough,
-    ocrLang: String(raw.ocrLang || DEFAULT_SETTINGS.ocrLang),
+    ocrLang: normalizeSourceLanguage(raw.ocrLang),
+    targetLanguage: normalizeTargetLanguage(raw.targetLanguage),
+    mode: normalizeCaptureMode(raw.mode),
+    polling_ms: clamp(Math.round(asFiniteNumber(
+      raw.polling_ms ?? (raw as unknown as { poll_ms?: unknown }).poll_ms,
+      DEFAULT_SETTINGS.polling_ms,
+    )), 100, 60_000),
+    backendUrl: process.env.OVERLAY_BACKEND_URL || DEFAULT_SETTINGS.backendUrl,
+    backendToken: process.env.OVERLAY_BACKEND_TOKEN || DEFAULT_SETTINGS.backendToken,
     background,
     textColor,
     translateColor,
     captureRegion,
+    captureRegions,
   };
+  delete (normalized as OverlaySettings & { poll_ms?: unknown }).poll_ms;
+  return normalized;
 }
 
-const gameId = process.env.GAME_ID || "demo";
-const wsUrl = process.env.OVERLAY_WS_URL || "ws://127.0.0.1:8765";
-const repoRoot = path.resolve(__dirname, "../../..");
+function settingsForProfile(settings: OverlaySettings): Omit<OverlaySettings, "backendUrl" | "backendToken"> {
+  const { backendUrl: _backendUrl, backendToken: _backendToken, ...profileSettings } = settings;
+  return profileSettings;
+}
+
+const profileStore = new ProfileStore(path.join(repoRoot, "data", "profiles"));
+let profileId = profileStore.resolveInitial(process.env.OVERLAY_DEFAULT_PROFILE);
 
 let overlayWindow: BrowserWindow | null = null;
 let controlWindow: BrowserWindow | null = null;
+let transcriptWindow: BrowserWindow | null = null;
 let selectionWindows: SelectionWindow[] = [];
 let appMenu: Menu | null = null;
 let quitting = false;
+let streamStatus: StreamStatus = { state: "offline", message: "Not connected" };
+const latestTranslations = new Map<string, TranslationResult>();
+const transcriptHistory: TranslationResult[] = [];
+const desktopCapture = new DesktopCapture();
+let desktopStream: DesktopStream | null = null;
 
 function getTargetDisplay(profile: Record<string, unknown>): Display {
   const displayId = profile.capture_display_id;
@@ -167,6 +244,46 @@ function getTargetDisplay(profile: Record<string, unknown>): Display {
   }
 
   return screen.getPrimaryDisplay();
+}
+
+function displayForCaptureRegion(region: CaptureRegion, fallback: Display): Display {
+  const center = {
+    x: region.left + region.width / 2,
+    y: region.top + region.height / 2,
+  };
+  const match = screen.getAllDisplays().find((display) => {
+    const scale = process.platform === "win32" ? (display.scaleFactor || 1) : 1;
+    const left = display.bounds.x * scale;
+    const top = display.bounds.y * scale;
+    const right = left + display.bounds.width * scale;
+    const bottom = top + display.bounds.height * scale;
+    return center.x >= left && center.x < right && center.y >= top && center.y < bottom;
+  });
+  return match ?? fallback;
+}
+
+function getCaptureTargets(): CaptureTarget[] {
+  const profile = loadProfile(profileId);
+  const settings = getOverlaySettings(profileId);
+  const defaultDisplay = getTargetDisplay(profile);
+  if (settings.mode === "full_screen") {
+    return [{ regionId: `screen-${defaultDisplay.id}`, display: defaultDisplay }];
+  }
+
+  const primaryRegion = normalizeCaptureRegion(profile.capture_region);
+  if (settings.mode === "one_large_area") {
+    return primaryRegion
+      ? [{ regionId: "region-1", display: displayForCaptureRegion(primaryRegion, defaultDisplay), region: primaryRegion }]
+      : [];
+  }
+
+  const savedRegions = normalizeCaptureRegions(profile.capture_regions);
+  const regions = savedRegions.length > 0 ? savedRegions : (primaryRegion ? [primaryRegion] : []);
+  return regions.map((region, index) => ({
+    regionId: `region-${index + 1}`,
+    display: displayForCaptureRegion(region, defaultDisplay),
+    region,
+  }));
 }
 
 function deriveOverlayCaptureRegion(profile: Record<string, unknown>, targetDisplay: Display): CaptureRegion | undefined {
@@ -198,30 +315,19 @@ function deriveOverlayCaptureRegion(profile: Record<string, unknown>, targetDisp
   };
 }
 
-function profilePathFor(game: string): string {
-  return path.join(repoRoot, "data", "profiles", `${game}.json`);
+function loadProfile(id: string): Record<string, unknown> {
+  return profileStore.load(id);
 }
 
-function loadProfile(game: string): Record<string, unknown> {
-  const profilePath = profilePathFor(game);
-  if (!fs.existsSync(profilePath)) {
-    return { game_id: game };
+function saveProfile(id: string, profile: Record<string, unknown>): void {
+  profileStore.save(id, profile);
+}
+
+function ensureProfileExists(id: string): Record<string, unknown> {
+  if (!profileStore.exists(id)) {
+    profileStore.create(id);
   }
-  const raw = fs.readFileSync(profilePath, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
-function saveProfile(game: string, profile: Record<string, unknown>): void {
-  const profilePath = profilePathFor(game);
-  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-  fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2) + "\n", "utf-8");
-}
-
-function ensureProfileExists(game: string): Record<string, unknown> {
-  const profile = loadProfile(game);
-  if (typeof profile.game_id !== "string") {
-    profile.game_id = game;
-  }
+  const profile = loadProfile(id);
   const targetDisplay = getTargetDisplay(profile);
   let normalized = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
   if (!normalized.captureRegion) {
@@ -233,13 +339,18 @@ function ensureProfileExists(game: string): Record<string, unknown> {
       );
     }
   }
-  profile.overlay_settings = normalized;
-  saveProfile(game, profile);
+  profile.overlay_settings = settingsForProfile(normalized);
+  saveProfile(id, profile);
   return profile;
 }
 
-function hasCaptureRegion(game: string): boolean {
-  const profile = loadProfile(game);
+function hasCaptureRegion(id: string): boolean {
+  const profile = loadProfile(id);
+  const settings = getOverlaySettings(id);
+  if (settings.mode === "full_screen") return true;
+  if (settings.mode === "multiple_regions" && normalizeCaptureRegions(profile.capture_regions).length > 0) {
+    return true;
+  }
   const region = profile.capture_region as Partial<CaptureRegion> | undefined;
   return Boolean(
     region &&
@@ -252,8 +363,8 @@ function hasCaptureRegion(game: string): boolean {
   );
 }
 
-function getOverlaySettings(game: string): OverlaySettings {
-  const profile = loadProfile(game);
+function getOverlaySettings(id: string): OverlaySettings {
+  const profile = loadProfile(id);
   const targetDisplay = getTargetDisplay(profile);
   let normalized = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
   if (!normalized.captureRegion) {
@@ -265,26 +376,27 @@ function getOverlaySettings(game: string): OverlaySettings {
       );
     }
   }
-  profile.overlay_settings = normalized;
-  saveProfile(game, profile);
+  profile.overlay_settings = settingsForProfile(normalized);
+  saveProfile(id, profile);
   return normalized;
 }
 
-function saveOverlaySettings(game: string, settings: OverlaySettings): OverlaySettings {
-  const profile = loadProfile(game);
+function saveOverlaySettings(id: string, settings: OverlaySettings): OverlaySettings {
+  const profile = loadProfile(id);
   const targetDisplay = getTargetDisplay(profile);
   const normalized = normalizeOverlaySettings(settings, targetDisplay.bounds);
-  profile.overlay_settings = normalized;
-  saveProfile(game, profile);
+  profile.overlay_settings = settingsForProfile(normalized);
+  saveProfile(id, profile);
   return normalized;
 }
 
 function saveCaptureRegion(
-  game: string,
+  id: string,
   region: CaptureRegion,
   pickerWindowBounds?: { x: number; y: number },
 ): void {
-  const profile = loadProfile(game);
+  const profile = loadProfile(id);
+  const previousPrimaryRegion = normalizeCaptureRegion(profile.capture_region);
   const targetDisplay = screen.getDisplayNearestPoint({
     x: Math.round(region.left + region.width / 2),
     y: Math.round(region.top + region.height / 2),
@@ -294,6 +406,23 @@ function saveCaptureRegion(
 
   profile.capture_region = region;
   profile.capture_display_id = targetDisplay.id;
+
+  const currentSettings = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
+  if (currentSettings.mode === "multiple_regions") {
+    const existingRegions = normalizeCaptureRegions(profile.capture_regions);
+    const seededRegions = existingRegions.length > 0
+      ? existingRegions
+      : previousPrimaryRegion
+        ? [previousPrimaryRegion]
+        : [];
+    const duplicate = seededRegions.some((item) => (
+      item.left === region.left
+      && item.top === region.top
+      && item.width === region.width
+      && item.height === region.height
+    ));
+    profile.capture_regions = duplicate ? seededRegions : [...seededRegions, region];
+  }
 
   const displayBounds = targetDisplay.bounds;
   const originX = pickerWindowBounds?.x ?? displayBounds.x;
@@ -312,7 +441,7 @@ function saveCaptureRegion(
   };
 
   const existing = normalizeOverlaySettings(profile.overlay_settings, displayBounds);
-  profile.overlay_settings = normalizeOverlaySettings({
+  const normalized = normalizeOverlaySettings({
     ...existing,
     placementMode: existing.placementMode || "free",
     width: captureRegion.width,
@@ -326,8 +455,9 @@ function saveCaptureRegion(
       },
     },
   }, displayBounds);
+  profile.overlay_settings = settingsForProfile(normalized);
 
-  saveProfile(game, profile);
+  saveProfile(id, profile);
 }
 
 function applyClickthrough(enabled: boolean): boolean {
@@ -338,8 +468,65 @@ function applyClickthrough(enabled: boolean): boolean {
   return enabled;
 }
 
+function sendToDesktopRenderers(channel: string, payload: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(channel, payload);
+    }
+  }
+}
+
+function publishTranslation(result: TranslationResult): void {
+  latestTranslations.set(result.regionId, result);
+  const previous = transcriptHistory.at(-1);
+  if (!previous || previous.dedupeKey !== result.dedupeKey || previous.regionId !== result.regionId) {
+    transcriptHistory.push(result);
+    if (transcriptHistory.length > 500) transcriptHistory.shift();
+  }
+  sendToDesktopRenderers("translation:result", result);
+}
+
+function publishClear(message: TranslationClear): void {
+  latestTranslations.delete(message.regionId);
+  sendToDesktopRenderers("translation:clear", message);
+}
+
+function publishStreamStatus(status: StreamStatus): void {
+  streamStatus = status;
+  sendToDesktopRenderers("stream:status", status);
+}
+
+function getProfileState(): ProfileState {
+  return {
+    activeProfileId: profileId,
+    profiles: profileStore.list(),
+  };
+}
+
+function publishProfileState(): ProfileState {
+  const state = getProfileState();
+  sendToDesktopRenderers("profile:changed", state);
+  return state;
+}
+
+function activateProfile(nextProfileId: string): ProfileState {
+  closeRegionPickerWindows();
+  profileId = profileStore.setActive(nextProfileId);
+  ensureProfileExists(profileId);
+  latestTranslations.clear();
+  transcriptHistory.length = 0;
+  desktopCapture.reset();
+  desktopStream?.refreshCapture();
+  refreshOverlayWindowForProfile();
+  if (transcriptWindow && !transcriptWindow.isDestroyed()) {
+    transcriptWindow.webContents.reloadIgnoringCache();
+  }
+  applyClickthrough(getOverlaySettings(profileId).clickthrough);
+  return publishProfileState();
+}
+
 function createOverlayWindow(): BrowserWindow {
-  const profile = loadProfile(gameId);
+  const profile = loadProfile(profileId);
   const targetDisplay = getTargetDisplay(profile);
   const bounds = targetDisplay.bounds;
   const win = new BrowserWindow({
@@ -363,9 +550,7 @@ function createOverlayWindow(): BrowserWindow {
   });
 
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.loadFile(path.join(__dirname, "renderer/overlay/index.html"), {
-    query: { ws: wsUrl },
-  });
+  win.loadFile(path.join(__dirname, "renderer/overlay/index.html"));
   win.webContents.on("before-input-event", (event, input) => {
     if (input.key === "Escape") {
       event.preventDefault();
@@ -373,7 +558,7 @@ function createOverlayWindow(): BrowserWindow {
     }
   });
 
-  const settings = getOverlaySettings(gameId);
+  const settings = getOverlaySettings(profileId);
   win.setIgnoreMouseEvents(settings.clickthrough, { forward: true });
 
   return win;
@@ -382,9 +567,9 @@ function createOverlayWindow(): BrowserWindow {
 function createControlWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 420,
-    height: 320,
+    height: 520,
     minWidth: 380,
-    minHeight: 280,
+    minHeight: 460,
     title: "App Lang Overlay",
     autoHideMenuBar: false,
     show: false,
@@ -415,6 +600,38 @@ function createControlWindow(): BrowserWindow {
   });
 
   return win;
+}
+
+function createTranscriptWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 680,
+    height: 560,
+    minWidth: 420,
+    minHeight: 320,
+    title: "OCR Translation Transcript",
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload/index.js"),
+    },
+  });
+  win.loadFile(path.join(__dirname, "renderer/transcript/index.html"));
+  win.on("close", (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
+  return win;
+}
+
+function showTranscriptWindow(): void {
+  if (!transcriptWindow || transcriptWindow.isDestroyed()) {
+    transcriptWindow = createTranscriptWindow();
+  }
+  if (transcriptWindow.isMinimized()) transcriptWindow.restore();
+  transcriptWindow.show();
+  transcriptWindow.focus();
 }
 
 function showControlWindow(): void {
@@ -457,7 +674,7 @@ function toggleOverlayPanel(): void {
 }
 
 function refreshOverlayWindowForProfile(): void {
-  const profile = loadProfile(gameId);
+  const profile = loadProfile(profileId);
   const targetDisplay = getTargetDisplay(profile);
   const bounds = targetDisplay.bounds;
 
@@ -539,21 +756,43 @@ function closeRegionPickerWindows(): void {
   selectionWindows = [];
 }
 
-ipcMain.handle("overlay:get-settings", () => getOverlaySettings(gameId));
+ipcMain.handle("overlay:get-settings", () => getOverlaySettings(profileId));
 
 ipcMain.handle("overlay:save-settings", (_event, payload: OverlaySettings) => {
-  const saved = saveOverlaySettings(gameId, payload);
+  const previous = getOverlaySettings(profileId);
+  const saved = saveOverlaySettings(profileId, payload);
   applyClickthrough(saved.clickthrough);
+  desktopCapture.reset();
+  desktopStream?.applySettings(previous, saved);
   return saved;
 });
 
 ipcMain.handle("overlay:set-clickthrough", (_event, enabled: boolean) => {
-  const current = getOverlaySettings(gameId);
-  const saved = saveOverlaySettings(gameId, { ...current, clickthrough: Boolean(enabled) });
+  const current = getOverlaySettings(profileId);
+  const saved = saveOverlaySettings(profileId, { ...current, clickthrough: Boolean(enabled) });
   return applyClickthrough(saved.clickthrough);
 });
 
-ipcMain.handle("overlay:get-game-id", () => gameId);
+ipcMain.handle("profile:get-active", () => profileId);
+ipcMain.handle("profile:list", () => getProfileState());
+ipcMain.handle("profile:create", (_event, nextProfileId: unknown) => {
+  profileStore.create(String(nextProfileId ?? ""));
+  return activateProfile(String(nextProfileId ?? ""));
+});
+ipcMain.handle("profile:load", (_event, nextProfileId: unknown) => (
+  activateProfile(String(nextProfileId ?? ""))
+));
+ipcMain.handle("profile:rename", (_event, nextProfileId: unknown) => {
+  profileId = profileStore.rename(profileId, String(nextProfileId ?? ""));
+  profileStore.setActive(profileId);
+  refreshOverlayWindowForProfile();
+  return publishProfileState();
+});
+ipcMain.handle("translation:get-latest", () => [...latestTranslations.values()]);
+ipcMain.handle("translation:get-history", () => [...transcriptHistory]);
+ipcMain.handle("stream:get-status", () => streamStatus);
+ipcMain.handle("stream:get-paused", () => desktopStream?.isPaused() ?? false);
+ipcMain.handle("stream:toggle-pause", () => desktopStream?.togglePaused() ?? false);
 ipcMain.handle("overlay:copy-text", (_event, text: string) => {
   const safe = String(text || "");
   if (!safe.trim()) return false;
@@ -584,10 +823,14 @@ ipcMain.handle("control:toggle-overlay-panel", () => {
   toggleOverlayPanel();
   return true;
 });
+ipcMain.handle("control:show-transcript", () => {
+  showTranscriptWindow();
+  return true;
+});
 ipcMain.handle("control:toggle-clickthrough", () => {
-  const settings = getOverlaySettings(gameId);
+  const settings = getOverlaySettings(profileId);
   const next = !settings.clickthrough;
-  saveOverlaySettings(gameId, { ...settings, clickthrough: next });
+  saveOverlaySettings(profileId, { ...settings, clickthrough: next });
   applyClickthrough(next);
   return next;
 });
@@ -622,15 +865,17 @@ ipcMain.handle("picker:submit", (event, region: CaptureRegion) => {
   const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
   const pickerBounds = selectedWindow && !selectedWindow.isDestroyed() ? selectedWindow.getBounds() : undefined;
 
-  saveCaptureRegion(gameId, region, pickerBounds);
+  saveCaptureRegion(profileId, region, pickerBounds);
+  desktopCapture.reset();
+  desktopStream?.refreshCapture();
   refreshOverlayWindowForProfile();
   closeRegionPickerWindows();
 
   return {
     status: "ok",
-    game_id: gameId,
+    profile_id: profileId,
     capture_region: region,
-    profile_path: profilePathFor(gameId),
+    profile_path: profileStore.pathFor(profileId),
   };
 });
 
@@ -654,10 +899,22 @@ const template: MenuItemConstructorOptions[] = [
       {
         label: "Toggle Clickthrough",
         click: () => {
-          const settings = getOverlaySettings(gameId);
+          const settings = getOverlaySettings(profileId);
           const next = !settings.clickthrough;
-          saveOverlaySettings(gameId, { ...settings, clickthrough: next });
+          saveOverlaySettings(profileId, { ...settings, clickthrough: next });
           applyClickthrough(next);
+        },
+      },
+      {
+        label: "Pause/Resume Capture",
+        click: () => {
+          desktopStream?.togglePaused();
+        },
+      },
+      {
+        label: "Show Transcript",
+        click: () => {
+          showTranscriptWindow();
         },
       },
       {
@@ -673,6 +930,13 @@ const template: MenuItemConstructorOptions[] = [
       },
     ],
   },
+  {
+    label: 'Edit',
+    submenu: [
+      { role: 'copy' },
+      { role: 'selectAll' }
+    ]
+  },
 ];
 
 app.whenReady().then(() => {
@@ -681,7 +945,8 @@ app.whenReady().then(() => {
     app.dock?.show();
   }
 
-  ensureProfileExists(gameId);
+  ensureProfileExists(profileId);
+  profileId = profileStore.setActive(profileId);
 
   globalShortcut.register("CommandOrControl+Shift+R", () => {
     openRegionPickerWindows().catch((err) => {
@@ -702,9 +967,20 @@ app.whenReady().then(() => {
 
   overlayWindow = createOverlayWindow();
   controlWindow = createControlWindow();
+  transcriptWindow = createTranscriptWindow();
   showControlWindow();
 
-  if (!hasCaptureRegion(gameId)) {
+  desktopStream = new DesktopStream({
+    appVersion: app.getVersion(),
+    getSettings: () => getOverlaySettings(profileId),
+    captureFrames: () => desktopCapture.capture(getCaptureTargets()),
+    onResult: publishTranslation,
+    onClear: publishClear,
+    onStatus: publishStreamStatus,
+  });
+  desktopStream.start();
+
+  if (!hasCaptureRegion(profileId)) {
     openRegionPickerWindows().catch((err) => {
       console.error("[overlay] initial picker failed:", err);
     });
@@ -715,7 +991,11 @@ app.on("activate", () => {
   showControlWindow();
 });
 
-app.on("will-quit", () => {
+app.on("before-quit", () => {
   quitting = true;
+  desktopStream?.stop();
+});
+
+app.on("will-quit", () => {
   globalShortcut.unregisterAll();
 });

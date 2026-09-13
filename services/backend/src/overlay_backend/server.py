@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from websockets.asyncio.server import serve
 
 from .api import WebSocketGateway
-from .config import BackendSettings
+from .config import BACKEND_ROOT, BackendSettings
 from .ocr import PaddleOcrProvider
 from .pipeline import FramePipeline
 from .services import SessionRegistry
@@ -36,7 +36,7 @@ async def run_overlay_backend(settings: BackendSettings | None = None) -> None:
 
 
 def main() -> None:
-    load_dotenv(override=False)
+    load_dotenv(BACKEND_ROOT / ".env", override=False)
     asyncio.run(run_overlay_backend(BackendSettings.from_env()))
 
 

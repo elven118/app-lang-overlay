@@ -4,6 +4,7 @@ import asyncio
 import copy
 import hmac
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -30,6 +31,9 @@ from .protocol import (
     parse_text_frame,
     require_fields,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +112,13 @@ class WebSocketGateway:
                     )
                     continue
                 except Exception:
+                    LOGGER.exception(
+                        "Frame processing failed session=%s region=%s frame=%s kind=%s",
+                        active.session_id,
+                        region_id,
+                        queued.frame_id,
+                        queued.kind,
+                    )
                     await send(
                         error_payload(
                             ProtocolError(
@@ -129,7 +140,7 @@ class WebSocketGateway:
                     or active.paused
                     or current_region is None
                     or active.revision != queued.session_revision
-                    or current_region.last_received_frame != frame_number(queued.frame_id)
+                    or frame_number(queued.frame_id) <= current_region.last_result_frame
                 ):
                     continue
                 current_region.empty_frame_count = isolated_region.empty_frame_count
@@ -139,6 +150,7 @@ class WebSocketGateway:
                     await send(result.as_dict())
                 elif current_region.empty_frame_count == 2:
                     current_region.last_dedupe_key = ""
+                    current_region.last_result_frame = frame_number(queued.frame_id)
                     await send(
                         {
                             "type": "translation.clear",
@@ -371,6 +383,7 @@ class WebSocketGateway:
                         )
                     )
                 except Exception:
+                    LOGGER.exception("WebSocket message processing failed")
                     await send(
                         error_payload(
                             ProtocolError(

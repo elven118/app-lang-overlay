@@ -1,4 +1,10 @@
-import type { OverlaySettings } from './shared/types';
+import type {
+  OverlaySettings,
+  ProfileState,
+  StreamStatus,
+  TranslationClear,
+  TranslationResult,
+} from './shared/types';
 
 export {};
 
@@ -9,10 +15,12 @@ declare global {
       saveSettings: (payload: OverlaySettings) => Promise<OverlaySettings>;
       setClickthrough: (enabled: boolean) => Promise<boolean>;
       copyText: (text: string) => Promise<boolean>;
-      getGameId: () => Promise<string>;
+      getProfileId: () => Promise<string>;
+      getLatestTranslations: () => Promise<TranslationResult[]>;
+      getTranslationHistory: () => Promise<TranslationResult[]>;
       pickRegion: () => Promise<{
         status: string;
-        game_id?: string;
+        profile_id?: string;
         capture_region?: {
           left: number;
           top: number;
@@ -24,6 +32,9 @@ declare global {
       onTogglePanel: (callback: () => void) => void;
       onCopyCurrent: (callback: () => void) => void;
       onClosePanel: (callback: () => void) => void;
+      onTranslationResult: (callback: (payload: TranslationResult) => void) => void;
+      onTranslationClear: (callback: (payload: TranslationClear) => void) => void;
+      onStreamStatus: (callback: (payload: StreamStatus) => void) => void;
     };
     pickerApi: {
       select: () => void;
@@ -44,10 +55,13 @@ declare global {
       hideWindow: () => Promise<boolean>;
       getVisible: () => Promise<boolean>;
       getSettings: () => Promise<OverlaySettings>;
-      getGameId: () => Promise<string>;
+      getProfileState: () => Promise<ProfileState>;
+      createProfile: (profileId: string) => Promise<ProfileState>;
+      loadProfile: (profileId: string) => Promise<ProfileState>;
+      renameProfile: (profileId: string) => Promise<ProfileState>;
       pickRegion: () => Promise<{
         status: string;
-        game_id?: string;
+        profile_id?: string;
         capture_region?: {
           left: number;
           top: number;
@@ -57,7 +71,13 @@ declare global {
         profile_path?: string;
       }>;
       toggleOverlayPanel: () => Promise<boolean>;
+      showTranscript: () => Promise<boolean>;
       toggleClickthrough: () => Promise<boolean>;
+      getStreamStatus: () => Promise<StreamStatus>;
+      getPaused: () => Promise<boolean>;
+      togglePause: () => Promise<boolean>;
+      onStreamStatus: (callback: (payload: StreamStatus) => void) => void;
+      onProfileChanged: (callback: (payload: ProfileState) => void) => void;
     };
   }
 }

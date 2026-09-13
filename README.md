@@ -12,15 +12,14 @@ Architecture:
 ```text
 app-lang-overlay/
   apps/
-    desktop/                # Electron frontend
+    desktop/                # Electron frontend and its local .env
     ios/                    # iOS app
   services/
-    backend/                # ONNX OCR, translation, and WebSocket service
+    backend/                # Backend service and its local .env
       src/overlay_backend/  # Python package
       resources/ocr/        # OCR dictionaries
       tests/                # backend tests and diagnostic tools
   shared/protocol/v1/       # approved cross-platform protocol schema
-  config/                   # runtime config
   data/                     # runtime state (profiles)
   models/                   # local model artifacts
 ```
@@ -45,6 +44,9 @@ The default endpoint is `ws://127.0.0.1:8765/v1/stream`. A bearer token is
 required when binding outside loopback, and an insecure LAN listener must also
 be explicitly enabled.
 
+Backend configuration is loaded from `services/backend/.env`. Copy
+`services/backend/.env.example` when creating a new development environment.
+
 ## Run Electron overlay only
 
 ```bash
@@ -53,6 +55,9 @@ npm install
 npm run overlay
 ```
 
+Desktop connection defaults are loaded from `apps/desktop/.env`. Copy
+`apps/desktop/.env.example` on a new machine.
+
 ## Development launcher
 
 ```bash
@@ -60,55 +65,56 @@ cd apps/desktop
 npm run dev
 ```
 
-The desktop client protocol migration follows the backend phase.
+The Electron main process owns screen capture and the `/v1/stream` connection.
+It sends cropped JPEG frames to server ONNX OCR and forwards typed translation
+results to the overlay and transcript through IPC; renderers never connect to
+the backend directly.
 
-## Run standalone LLM server on another PC
+Desktop capture settings are stored per profile:
 
-On the high-end PC:
+- `mode`: `full_screen`, `one_large_area`, or `multiple_regions`
+- `polling_ms`: capture polling interval in milliseconds (minimum 100)
 
-```bash
-PYTHONPATH=services/backend/src python -m overlay_backend.translation_server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf
-```
+In `multiple_regions` mode, each additional use of **Pick Capture Region** adds
+another region. Pause/resume is available from the control window and app menu.
 
-Optional API key:
+Profiles are stored as `data/profiles/<profile>.json`. The control window can
+create, load, and rename profiles without restarting Electron. The active
+profile is restored on the next launch; `OVERLAY_DEFAULT_PROFILE` can override
+it for a specific launch.
 
-```bash
-PYTHONPATH=services/backend/src python -m overlay_backend.translation_server --host 0.0.0.0 --port 8790 --model-path ./models/HY-MT1.5-7B-Q4_K_M.gguf --api-key YOUR_SECRET
-```
+## Connect the backend to an external translation API
 
-Endpoints:
-- `GET /health`
-- `POST /translate`
-
-`POST /translate` request body:
+Remote mode sends a `POST` request containing:
 
 ```json
 {
   "text": "おはよう。",
-  "target_lang": "English"
+  "source_lang": "ja",
+  "target_lang": "en"
 }
 ```
 
-## Connect the backend to a remote LLM server
-
-Set `config/runtime.json` on your overlay PC:
+The API must return the translated text in `translated_text`, `translatedText`,
+or `text`:
 
 ```json
 {
-  "llm": {
-    "mode": "remote",
-    "remote_url": "http://HIGH_END_PC_IP:8790/translate",
-    "remote_api_key": "",
-    "max_tokens": 512
-  }
+  "translated_text": "Good morning."
 }
+```
+
+Configure the external provider in `services/backend/.env`:
+
+```dotenv
+OVERLAY_LLM_MODE=remote
+OVERLAY_LLM_REMOTE_URL=https://translator.example.com/translate
+OVERLAY_LLM_REMOTE_API_KEY=
 ```
 
 To stay fully local on stronger PCs, switch back:
 
-```json
-"llm": {
-  "mode": "local",
-  "model_path": "./models/HY-MT1.5-7B-Q4_K_M.gguf"
-}
+```dotenv
+OVERLAY_LLM_MODE=local
+OVERLAY_LLM_MODEL_PATH=./models/HY-MT1.5-7B-Q4_K_M.gguf
 ```

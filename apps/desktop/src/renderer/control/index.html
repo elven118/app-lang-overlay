@@ -12,8 +12,23 @@
   <main class="panel">
     <h1>App Lang Overlay</h1>
     <p id="status-line">Loading...</p>
+    <section class="profiles" aria-labelledby="profiles-heading">
+      <h2 id="profiles-heading">Profiles</h2>
+      <label for="profile-select">Active profile</label>
+      <select id="profile-select"></select>
+      <label for="profile-name">New name</label>
+      <input id="profile-name" type="text" maxlength="64" autocomplete="off" placeholder="e.g. manga" />
+      <div class="profile-actions">
+        <button id="btn-load-profile" type="button">Load</button>
+        <button id="btn-create-profile" type="button">Create</button>
+        <button id="btn-rename-profile" type="button">Rename</button>
+      </div>
+      <p id="profile-message" class="profile-message" aria-live="polite"></p>
+    </section>
     <div class="actions">
       <button id="btn-pick-region" type="button">Pick Capture Region</button>
+      <button id="btn-toggle-pause" type="button">Pause Capture</button>
+      <button id="btn-show-transcript" type="button">Show Transcript</button>
       <button id="btn-toggle-clickthrough" type="button">Toggle Clickthrough</button>
       <button id="btn-toggle-settings" type="button">Toggle Overlay Settings</button>
     </div>

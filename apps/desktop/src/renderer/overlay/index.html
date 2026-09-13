@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src 'self'; script-src 'self'; connect-src ws:" />
+    content="default-src 'none'; style-src 'self'; script-src 'self';" />
   <title>App Lang Overlay</title>
   <link rel="stylesheet" href="overlay.css" />
 </head>
@@ -20,6 +20,14 @@
   <div id="selection-area" class="hidden"></div>
   <div id="settings-panel" class="hidden">
     <div class="panel-title">Overlay Settings</div>
+    <label>Capture Mode
+      <select id="setting-capture-mode">
+        <option value="full_screen">Full screen</option>
+        <option value="one_large_area">One large area</option>
+        <option value="multiple_regions">Multiple regions</option>
+      </select>
+    </label>
+    <label>Polling Interval (ms) <input id="setting-polling-ms" type="number" step="100" min="100" max="60000" /></label>
     <label>Position 
       <select id="setting-position">
         <option value="above">Above Capture</option>
@@ -37,11 +45,19 @@
     <label>Auto Hide (ms) <input id="setting-autohide" type="number" step="100" min="300" /></label>
     <label>OCR Input Language
       <select id="setting-ocr-lang">
+        <option value="auto">Auto detect</option>
         <option value="en">English (en)</option>
-        <option value="japan">Japanese (japan)</option>
-        <option value="ch">Chinese Simplified (ch)</option>
-        <option value="chinese_cht">Chinese Traditional (chinese_cht)</option>
-        <option value="korean">Korean (korean)</option>
+        <option value="ja">Japanese (ja)</option>
+        <option value="zh-Hans">Chinese Simplified (zh-Hans)</option>
+        <option value="zh-Hant">Chinese Traditional (zh-Hant)</option>
+        <option value="ko">Korean (ko)</option>
+      </select>
+    </label>
+    <label>Translation Language
+      <select id="setting-target-language">
+        <option value="zh-Hant">Chinese Traditional (zh-Hant)</option>
+        <option value="en">English (en)</option>
+        <option value="ja">Japanese (ja)</option>
       </select>
     </label>
     <label class="checkline"><input id="setting-clickthrough" type="checkbox" /> Clickthrough</label>

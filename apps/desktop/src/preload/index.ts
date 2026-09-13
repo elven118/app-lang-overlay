@@ -1,13 +1,22 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CaptureRegion, OverlaySettings } from '../shared/types';
+import type {
+  CaptureRegion,
+  OverlaySettings,
+  ProfileState,
+  StreamStatus,
+  TranslationClear,
+  TranslationResult,
+} from '../shared/types';
 
 contextBridge.exposeInMainWorld('overlayApi', {
   getSettings: (): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:get-settings'),
   saveSettings: (payload: OverlaySettings): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:save-settings', payload),
   setClickthrough: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('overlay:set-clickthrough', enabled),
   copyText: (text: string): Promise<boolean> => ipcRenderer.invoke('overlay:copy-text', text),
-  getGameId: (): Promise<string> => ipcRenderer.invoke('overlay:get-game-id'),
-  pickRegion: (): Promise<{ status: string; game_id?: string; capture_region?: CaptureRegion; profile_path?: string }> =>
+  getProfileId: (): Promise<string> => ipcRenderer.invoke('profile:get-active'),
+  getLatestTranslations: (): Promise<TranslationResult[]> => ipcRenderer.invoke('translation:get-latest'),
+  getTranslationHistory: (): Promise<TranslationResult[]> => ipcRenderer.invoke('translation:get-history'),
+  pickRegion: (): Promise<{ status: string; profile_id?: string; capture_region?: CaptureRegion; profile_path?: string }> =>
     ipcRenderer.invoke('overlay:pick-region'),
   onTogglePanel: (callback: () => void) => {
     ipcRenderer.on('overlay:toggle-panel', () => callback());
@@ -17,6 +26,15 @@ contextBridge.exposeInMainWorld('overlayApi', {
   },
   onClosePanel: (callback: () => void) => {
     ipcRenderer.on('overlay:close-panel', () => callback());
+  },
+  onTranslationResult: (callback: (payload: TranslationResult) => void) => {
+    ipcRenderer.on('translation:result', (_event, payload: TranslationResult) => callback(payload));
+  },
+  onTranslationClear: (callback: (payload: TranslationClear) => void) => {
+    ipcRenderer.on('translation:clear', (_event, payload: TranslationClear) => callback(payload));
+  },
+  onStreamStatus: (callback: (payload: StreamStatus) => void) => {
+    ipcRenderer.on('stream:status', (_event, payload: StreamStatus) => callback(payload));
   }
 });
 
@@ -26,11 +44,24 @@ contextBridge.exposeInMainWorld('controlApi', {
   hideWindow: (): Promise<boolean> => ipcRenderer.invoke('control:hide-window'),
   getVisible: (): Promise<boolean> => ipcRenderer.invoke('control:get-visible'),
   getSettings: (): Promise<OverlaySettings> => ipcRenderer.invoke('overlay:get-settings'),
-  getGameId: (): Promise<string> => ipcRenderer.invoke('overlay:get-game-id'),
-  pickRegion: (): Promise<{ status: string; game_id?: string; capture_region?: CaptureRegion; profile_path?: string }> =>
+  getProfileState: (): Promise<ProfileState> => ipcRenderer.invoke('profile:list'),
+  createProfile: (profileId: string): Promise<ProfileState> => ipcRenderer.invoke('profile:create', profileId),
+  loadProfile: (profileId: string): Promise<ProfileState> => ipcRenderer.invoke('profile:load', profileId),
+  renameProfile: (profileId: string): Promise<ProfileState> => ipcRenderer.invoke('profile:rename', profileId),
+  pickRegion: (): Promise<{ status: string; profile_id?: string; capture_region?: CaptureRegion; profile_path?: string }> =>
     ipcRenderer.invoke('overlay:pick-region'),
   toggleOverlayPanel: (): Promise<boolean> => ipcRenderer.invoke('control:toggle-overlay-panel'),
-  toggleClickthrough: (): Promise<boolean> => ipcRenderer.invoke('control:toggle-clickthrough')
+  showTranscript: (): Promise<boolean> => ipcRenderer.invoke('control:show-transcript'),
+  toggleClickthrough: (): Promise<boolean> => ipcRenderer.invoke('control:toggle-clickthrough'),
+  getStreamStatus: (): Promise<StreamStatus> => ipcRenderer.invoke('stream:get-status'),
+  getPaused: (): Promise<boolean> => ipcRenderer.invoke('stream:get-paused'),
+  togglePause: (): Promise<boolean> => ipcRenderer.invoke('stream:toggle-pause'),
+  onStreamStatus: (callback: (payload: StreamStatus) => void) => {
+    ipcRenderer.on('stream:status', (_event, payload: StreamStatus) => callback(payload));
+  },
+  onProfileChanged: (callback: (payload: ProfileState) => void) => {
+    ipcRenderer.on('profile:changed', (_event, payload: ProfileState) => callback(payload));
+  }
 });
 
 contextBridge.exposeInMainWorld('pickerApi', {

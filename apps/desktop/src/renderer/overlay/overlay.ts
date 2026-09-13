@@ -1,25 +1,3 @@
-type SubtitleEvent = {
-  type: 'subtitle';
-  profile: string;
-  timestamp: number;
-  source_text: string;
-  formatted_text?: string;
-  translated_text: string | null;
-  lang_src: string;
-  lang_dst: string;
-  dedupe_key: string;
-  hide_after_ms: number;
-};
-
-type SubtitleHideEvent = {
-  type: 'subtitle_hide';
-  profile: string;
-  timestamp: number;
-  reason?: string;
-};
-
-type OverlayEvent = SubtitleEvent | SubtitleHideEvent;
-
 import type { CaptureRegion, OverlaySettings } from '../../shared/types';
 
 const sourceEl = document.getElementById('source') as HTMLDivElement;
@@ -41,11 +19,13 @@ const backgroundAlphaInput = document.getElementById('setting-background-alpha')
 const autoHideInput = document.getElementById('setting-autohide') as HTMLInputElement;
 const ocrLangInput = document.getElementById('setting-ocr-lang') as HTMLSelectElement;
 const clickthroughInput = document.getElementById('setting-clickthrough') as HTMLInputElement;
+const captureModeInput = document.getElementById('setting-capture-mode') as HTMLSelectElement;
+const pollingMsInput = document.getElementById('setting-polling-ms') as HTMLInputElement;
+const targetLanguageInput = document.getElementById('setting-target-language') as HTMLSelectElement;
 
-let ws: WebSocket | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | undefined;
 let settings: OverlaySettings;
-let gameId = 'demo';
+let profileId = 'demo';
 let panelVisible = false;
 let latestSourceText = '';
 let latestTranslatedText = '';
@@ -144,11 +124,10 @@ function setStyle(nextSettings: OverlaySettings): void {
   applyPlacement(nextSettings);
 }
 
-function show(sourceText: string, translatedText: string | null, hideAfterMs: number, formattedText?: string): void {
+function show(sourceText: string, translatedText: string | null, hideAfterMs: number): void {
   latestSourceText = sourceText || '';
   latestTranslatedText = translatedText || '';
-  if (sourceEl) sourceEl.innerHTML = formattedText ? formattedText : '<span>' + (sourceText || '') + '</span>';
-  // if (sourceEl) sourceEl.textContent = sourceText;
+  if (sourceEl) sourceEl.textContent = sourceText || '';
   translatedEl.textContent = translatedText || '';
   box.classList.remove('hidden');
   box.classList.add('visible');
@@ -234,6 +213,9 @@ function syncPanelFromSettings(): void {
   autoHideInput.value = String(settings.autoHideMs);
   ocrLangInput.value = settings.ocrLang || 'en';
   clickthroughInput.checked = settings.clickthrough;
+  captureModeInput.value = settings.mode;
+  pollingMsInput.value = String(settings.polling_ms);
+  targetLanguageInput.value = settings.targetLanguage;
 }
 
 function parsePanelSettings(): OverlaySettings {
@@ -248,8 +230,11 @@ function parsePanelSettings(): OverlaySettings {
     translateColor: translateColorInput.value || settings.translateColor,
     background: composeBackground(),
     autoHideMs: Number(autoHideInput.value || settings.autoHideMs),
-    ocrLang: ocrLangInput.value || settings.ocrLang || 'en',
+    ocrLang: (ocrLangInput.value || settings.ocrLang || 'en') as OverlaySettings['ocrLang'],
     clickthrough: clickthroughInput.checked,
+    mode: captureModeInput.value as OverlaySettings['mode'],
+    polling_ms: Number(pollingMsInput.value || settings.polling_ms),
+    targetLanguage: targetLanguageInput.value as OverlaySettings['targetLanguage'],
   };
 }
 
@@ -355,33 +340,6 @@ function endDrag(): void {
   void persistSettings(settings);
 }
 
-function connect(): void {
-  const params = new URLSearchParams(window.location.search);
-  const wsUrl = params.get('ws') || 'ws://127.0.0.1:8765';
-  ws = new WebSocket(wsUrl);
-
-  ws.onmessage = (event: MessageEvent<string>) => {
-    let payload: OverlayEvent;
-    try {
-      payload = JSON.parse(event.data) as OverlayEvent;
-    } catch {
-      return;
-    }
-
-    if (payload.type === 'subtitle') {
-      if (payload.profile !== gameId) return;
-      show(payload.source_text, payload.translated_text, payload.hide_after_ms, payload.formatted_text);
-    } else if (payload.type === 'subtitle_hide') {
-      if (payload.profile !== gameId) return;
-      hide();
-    }
-  };
-
-  ws.onclose = () => {
-    setTimeout(connect, 1000);
-  };
-}
-
 function installPanelEvents(): void {
   const persist = () => {
     void persistFromPanel();
@@ -399,6 +357,9 @@ function installPanelEvents(): void {
   autoHideInput.addEventListener('change', persist);
   ocrLangInput.addEventListener('change', persist);
   clickthroughInput.addEventListener('change', persist);
+  captureModeInput.addEventListener('change', persist);
+  pollingMsInput.addEventListener('change', persist);
+  targetLanguageInput.addEventListener('change', persist);
 
   window.overlayApi.onTogglePanel(() => {
     void togglePanel(!panelVisible);
@@ -410,6 +371,12 @@ function installPanelEvents(): void {
     if (panelVisible) {
       void togglePanel(false);
     }
+  });
+  window.overlayApi.onTranslationResult((payload) => {
+    show(payload.combinedSourceText, payload.combinedTranslatedText, settings.autoHideMs);
+  });
+  window.overlayApi.onTranslationClear(() => {
+    hide();
   });
 
   box.addEventListener('mousedown', startDrag);
@@ -442,10 +409,15 @@ function installPanelEvents(): void {
 }
 
 (async () => {
-  gameId = await window.overlayApi.getGameId();
+  profileId = await window.overlayApi.getProfileId();
   settings = await window.overlayApi.getSettings();
   setStyle(settings);
   installPanelEvents();
-  show('Overlay ready', `Profile: ${gameId}`, 5000);
-  connect();
+  const latest = await window.overlayApi.getLatestTranslations();
+  const current = latest.at(-1);
+  if (current) {
+    show(current.combinedSourceText, current.combinedTranslatedText, settings.autoHideMs);
+  } else {
+    show('Overlay ready', `Profile: ${profileId}`, 5000);
+  }
 })();

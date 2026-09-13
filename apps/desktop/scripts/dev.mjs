@@ -2,31 +2,38 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const backendRoot = path.join(repoRoot, 'services', 'backend');
 const backendSource = path.join(backendRoot, 'src');
+const desktopRoot = path.resolve(__dirname, '..');
 const venvPython = process.platform === 'win32' 
   ? path.join(repoRoot, '.venv', 'Scripts', 'python.exe')
   : path.join(repoRoot, '.venv', 'bin', 'python');
 
 
-function loadRuntimeConfig() {
-  const configPath = path.join(repoRoot, 'config', 'runtime.json');
-  if (!fs.existsSync(configPath)) return {};
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+function loadEnvironment(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  return parseEnv(fs.readFileSync(filePath, 'utf-8'));
 }
 
-const runtime = loadRuntimeConfig();
-const overlay = runtime.overlay || {};
-const ocr = runtime.ocr || {};
+const backendEnv = {
+  ...loadEnvironment(path.join(backendRoot, '.env')),
+  ...process.env,
+};
+const desktopEnv = {
+  ...loadEnvironment(path.join(desktopRoot, '.env')),
+  ...process.env,
+};
 
-const game = process.env.GAME_ID || overlay.game_id || 'demo';
-const wsHost = process.env.OVERLAY_WS_HOST || overlay.ws_host || '127.0.0.1';
-const wsPort = String(process.env.OVERLAY_WS_PORT || overlay.ws_port || '8765');
-const tesseractCmd = process.env.TESSERACT_CMD || ocr.tesseract_cmd || '';
+const defaultProfile = desktopEnv.OVERLAY_DEFAULT_PROFILE;
+const wsHost = backendEnv.OVERLAY_BACKEND_HOST || '127.0.0.1';
+const wsPort = String(backendEnv.OVERLAY_BACKEND_PORT || '8765');
+const backendUrl = desktopEnv.OVERLAY_BACKEND_URL || `ws://${wsHost}:${wsPort}/v1/stream`;
+const backendToken = desktopEnv.OVERLAY_BACKEND_TOKEN || backendEnv.OVERLAY_BACKEND_API_TOKEN || '';
 
 const backendArgs = [
   '-m', 'overlay_backend'
@@ -40,26 +47,26 @@ const backend = spawn(backendPython, backendArgs, {
   stdio: 'inherit',
   cwd: repoRoot,
   env: {
-    ...process.env,
-    PYTHONPATH: [backendSource, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+    ...backendEnv,
+    PYTHONPATH: [backendSource, backendEnv.PYTHONPATH].filter(Boolean).join(path.delimiter),
     OVERLAY_PROJECT_ROOT: repoRoot,
-    OVERLAY_BACKEND_HOST: wsHost,
-    OVERLAY_BACKEND_PORT: wsPort
   }
 });
 
-const electronEnv = { ...process.env };
+const electronEnv = { ...desktopEnv };
 delete electronEnv.ELECTRON_RUN_AS_NODE;
+const electronExecutable = process.platform === 'win32'
+  ? path.join(repoRoot, 'apps', 'desktop', 'node_modules', '.bin', 'electron.cmd')
+  : path.join(repoRoot, 'apps', 'desktop', 'node_modules', '.bin', 'electron');
 
-const electron = spawn('npx', ['electron', '.'], {
+const electron = spawn(electronExecutable, ['.'], {
   stdio: 'inherit',
-  cwd: path.resolve(__dirname, '..'),
-  shell: true,
+  cwd: desktopRoot,
   env: {
     ...electronEnv,
-    ...(tesseractCmd ? { TESSERACT_CMD: tesseractCmd } : {}),
-    GAME_ID: game,
-    OVERLAY_WS_URL: `ws://${wsHost}:${wsPort}/v1/stream`
+    ...(defaultProfile ? { OVERLAY_DEFAULT_PROFILE: defaultProfile } : {}),
+    OVERLAY_BACKEND_URL: backendUrl,
+    OVERLAY_BACKEND_TOKEN: backendToken,
   }
 });
 

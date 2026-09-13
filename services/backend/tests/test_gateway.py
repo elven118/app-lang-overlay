@@ -139,17 +139,24 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             error = json.loads(await websocket.recv())
             self.assertEqual(error["code"], "stale_frame")
 
-    async def test_newest_frame_replaces_queued_work(self) -> None:
+    async def test_inflight_result_completes_and_newest_queued_frame_wins(self) -> None:
         self.gateway.pipeline.translator = _SlowTranslator()
         async with self.open() as websocket:
             await self.hello_and_start(websocket)
             await websocket.send(json.dumps(text_frame("10", "old")))
             await asyncio.sleep(0.01)
-            await websocket.send(json.dumps(text_frame("11", "new")))
-            result = json.loads(await websocket.recv())
-            self.assertEqual(result["type"], "translation.result")
-            self.assertEqual(result["frameId"], "11")
-            self.assertEqual(result["combinedSourceText"], "new")
+            await websocket.send(json.dumps(text_frame("11", "replaced")))
+            await websocket.send(json.dumps(text_frame("12", "new")))
+
+            inflight = json.loads(await websocket.recv())
+            self.assertEqual(inflight["type"], "translation.result")
+            self.assertEqual(inflight["frameId"], "10")
+            self.assertEqual(inflight["combinedSourceText"], "old")
+
+            newest = json.loads(await websocket.recv())
+            self.assertEqual(newest["type"], "translation.result")
+            self.assertEqual(newest["frameId"], "12")
+            self.assertEqual(newest["combinedSourceText"], "new")
 
 
 if __name__ == "__main__":

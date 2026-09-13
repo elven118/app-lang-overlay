@@ -9,6 +9,7 @@ from urllib import request
 
 from ..config import BackendSettings, PROJECT_ROOT
 from ..domain import TextBlock
+from .language_mapping import target_language_name
 
 
 class TranslationProvider(Protocol):
@@ -23,31 +24,15 @@ class TranslationProvider(Protocol):
 
 
 def _prompt(blocks: list[TextBlock], source_language: str, target_language: str) -> str:
-    source = [{"id": item.id, "text": item.text} for item in blocks]
+    source_text = "\n".join(item.text.strip() for item in blocks if item.text.strip())
+    target_language = target_language_name(target_language)
     return (
-        "Translate every item while using the complete array as context. "
-        "Preserve each id and return only a JSON array containing id and translatedText. "
-        f"Source language: {source_language}. Target language: {target_language}.\n"
-        f"Input: {json.dumps(source, ensure_ascii=False)}\nOutput:"
+        "You are a translator.\n"
+        f"Translate from {source_language} to {target_language}.\n"
+        "Return only the translated text.\n"
+        f"Input:\n{source_text}\n"
+        "Output:"
     )
-
-
-def _parse_aligned(body: object, blocks: list[TextBlock]) -> dict[str, str] | None:
-    if isinstance(body, dict):
-        body = body.get("blocks") or body.get("translations")
-    if not isinstance(body, list):
-        return None
-    expected = {item.id for item in blocks}
-    parsed: dict[str, str] = {}
-    for item in body:
-        if not isinstance(item, dict):
-            return None
-        item_id = str(item.get("id") or "")
-        translated = str(item.get("translatedText") or item.get("translated_text") or "").strip()
-        if item_id not in expected or not translated or item_id in parsed:
-            return None
-        parsed[item_id] = translated
-    return parsed if set(parsed) == expected else None
 
 
 class LocalLlamaProvider:
@@ -76,17 +61,17 @@ class LocalLlamaProvider:
         return self._llm
 
     def _translate_sync(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
+        if not blocks:
+            return {}
         output = self._load()(
             _prompt(blocks, source_language, target_language),
             max_tokens=int(os.getenv("OVERLAY_LLM_MAX_TOKENS", "1024")),
             temperature=0.1,
         )
-        raw = str(output["choices"][0]["text"]).strip()
-        try:
-            aligned = _parse_aligned(json.loads(raw), blocks)
-        except json.JSONDecodeError:
-            aligned = None
-        return aligned if aligned is not None else ({"__combined__": raw} if raw and blocks else {})
+        translated = str(output["choices"][0]["text"]).strip()
+        if not translated:
+            raise RuntimeError("Translator returned an empty translation")
+        return {"__combined__": translated}
 
     async def translate_blocks(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
         return await asyncio.to_thread(self._translate_sync, blocks, source_language, target_language)
@@ -99,12 +84,14 @@ class RemoteHttpProvider:
         self.revision = f"remote-http-v1:{url}"
 
     def _translate_sync(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
+        source_text = "\n".join(item.text.strip() for item in blocks if item.text.strip())
+        if not source_text:
+            return {}
         payload = json.dumps(
             {
-                "sourceLanguage": source_language,
-                "targetLanguage": target_language,
-                "blocks": [{"id": item.id, "text": item.text} for item in blocks],
-                "prompt": _prompt(blocks, source_language, target_language),
+                "text": source_text,
+                "source_lang": source_language,
+                "target_lang": target_language,
             },
             ensure_ascii=False,
         ).encode("utf-8")
@@ -114,12 +101,13 @@ class RemoteHttpProvider:
         req = request.Request(self._url, data=payload, headers=headers, method="POST")
         with request.urlopen(req, timeout=20) as response:
             body = json.loads(response.read().decode("utf-8"))
-        aligned = _parse_aligned(body, blocks)
-        if aligned is not None:
-            return aligned
-        combined = str(body.get("translatedText") or body.get("translated_text") or "").strip() if isinstance(body, dict) else ""
-        if blocks and combined:
-            return {"__combined__": combined}
+        translated = (
+            str(body.get("translated_text") or body.get("translatedText") or body.get("text") or "").strip()
+            if isinstance(body, dict)
+            else ""
+        )
+        if translated:
+            return {"__combined__": translated}
         raise RuntimeError("Remote translator returned no usable translation")
 
     async def translate_blocks(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:

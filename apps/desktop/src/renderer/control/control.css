@@ -16,6 +16,11 @@ h1 {
   font-size: 18px;
 }
 
+h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
 #status-line {
   margin: 0 0 14px;
   color: #a7b5c6;
@@ -25,6 +30,56 @@ h1 {
 .actions {
   display: grid;
   gap: 8px;
+}
+
+.profiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 8px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #2f3b49;
+  border-radius: 8px;
+  background: #131b24;
+}
+
+.profiles h2,
+.profile-actions,
+.profile-message {
+  grid-column: 1 / -1;
+}
+
+.profiles label {
+  align-self: center;
+  color: #a7b5c6;
+  font-size: 12px;
+}
+
+.profiles select,
+.profiles input {
+  min-width: 0;
+  border: 1px solid #2f3b49;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #0e1217;
+  color: #e6edf3;
+}
+
+.profile-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.profile-message {
+  min-height: 16px;
+  margin: 0;
+  color: #a7b5c6;
+  font-size: 12px;
+}
+
+.profile-message.error {
+  color: #ff8e8e;
 }
 
 button {
