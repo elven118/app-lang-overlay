@@ -5,7 +5,18 @@ export type CaptureRegion = {
   height: number;
 };
 
-export type CaptureMode = 'full_screen' | 'one_large_area' | 'multiple_regions';
+export type CaptureMode = 'selected_window' | 'one_large_area' | 'multiple_regions';
+
+export type WindowChoice = { id: string; name: string };
+
+export type PickerStart = {
+  originX: number;
+  originY: number;
+  captureScaleFactor: number;
+  multiple: boolean;
+  regions: CaptureRegion[];
+  otherRegionCount: number;
+};
 
 export type ProfileState = {
   activeProfileId: string;
@@ -40,7 +51,6 @@ export type OverlaySettings = {
   translateColor: string;
   background: string;
   autoHideMs: number;
-  clickthrough: boolean;
   ocrLang: SourceLanguage;
   targetLanguage: TargetLanguage;
   mode: CaptureMode;
@@ -90,6 +100,12 @@ export type TranslationResult = {
   };
 };
 
+export type DesktopRect = { x: number; y: number; width: number; height: number };
+
+// Desktop-only IPC metadata; not part of the WebSocket protocol.
+export type DesktopTranslationResult = TranslationResult & { captureBounds?: DesktopRect };
+export type OverlayViewport = { bounds: DesktopRect; workArea: DesktopRect };
+
 export type TranslationClear = {
   type: 'translation.clear';
   sessionId: string;
@@ -103,3 +119,9 @@ export type StreamStatus = {
   message: string;
   retryInMs?: number;
 };
+
+export interface WindowHover {
+  name: string;
+  error: string;
+  bounds: { x: number; y: number; width: number; height: number } | null;
+}

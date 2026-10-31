@@ -1,4 +1,5 @@
-import type { CaptureRegion, OverlaySettings } from '../../shared/types';
+import type { CaptureRegion, DesktopTranslationResult, OverlaySettings, OverlayViewport } from '../../shared/types';
+import { BlockOverlays } from './block-overlays';
 
 const sourceEl = document.getElementById('source') as HTMLDivElement;
 const translatedEl = document.getElementById('translated') as HTMLDivElement;
@@ -6,6 +7,8 @@ const box = document.getElementById('subtitle-box') as HTMLDivElement;
 const root = document.getElementById('root') as HTMLDivElement;
 const panel = document.getElementById('settings-panel') as HTMLDivElement;
 const selectionArea = document.getElementById('selection-area') as HTMLDivElement;
+const blockOverlays = new BlockOverlays(document.getElementById('block-overlays')!);
+let viewport: OverlayViewport;
 
 const positionInput = document.getElementById('setting-position') as HTMLSelectElement;
 const widthInput = document.getElementById('setting-width') as HTMLInputElement;
@@ -18,7 +21,6 @@ const backgroundColorInput = document.getElementById('setting-background-color')
 const backgroundAlphaInput = document.getElementById('setting-background-alpha') as HTMLInputElement;
 const autoHideInput = document.getElementById('setting-autohide') as HTMLInputElement;
 const ocrLangInput = document.getElementById('setting-ocr-lang') as HTMLSelectElement;
-const clickthroughInput = document.getElementById('setting-clickthrough') as HTMLInputElement;
 const captureModeInput = document.getElementById('setting-capture-mode') as HTMLSelectElement;
 const pollingMsInput = document.getElementById('setting-polling-ms') as HTMLInputElement;
 const targetLanguageInput = document.getElementById('setting-target-language') as HTMLSelectElement;
@@ -27,6 +29,7 @@ let hideTimer: ReturnType<typeof setTimeout> | undefined;
 let settings: OverlaySettings;
 let profileId = 'demo';
 let panelVisible = false;
+let selectionPreviewVisible = false;
 let latestSourceText = '';
 let latestTranslatedText = '';
 
@@ -53,6 +56,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function getCaptureRegion(nextSettings: OverlaySettings): CaptureRegion | null {
+  if (nextSettings.mode === 'selected_window') return null;
   const region = nextSettings.captureRegion;
   if (!region || region.width <= 0 || region.height <= 0) return null;
   return region;
@@ -66,16 +70,24 @@ function getRootSize(): { width: number; height: number } {
 }
 
 function syncSelectionArea(nextSettings: OverlaySettings): void {
-  const region = getCaptureRegion(nextSettings);
-  if (!region || !panelVisible) {
+  selectionArea.replaceChildren();
+  const single = getCaptureRegion(nextSettings);
+  const regions = nextSettings.mode === 'multiple_regions'
+    ? (nextSettings.captureRegions ?? []) : single ? [single] : [];
+  if (!regions.length || !(panelVisible || selectionPreviewVisible)) {
     selectionArea.classList.add('hidden');
     return;
   }
 
-  selectionArea.style.left = `${region.left}px`;
-  selectionArea.style.top = `${region.top}px`;
-  selectionArea.style.width = `${region.width}px`;
-  selectionArea.style.height = `${region.height}px`;
+  for (const region of regions) {
+    const left = region.left - (nextSettings.mode === 'multiple_regions' ? viewport.bounds.x : 0);
+    const top = region.top - (nextSettings.mode === 'multiple_regions' ? viewport.bounds.y : 0);
+    if (left + region.width <= 0 || top + region.height <= 0 || left >= viewport.bounds.width || top >= viewport.bounds.height) continue;
+    const outline = document.createElement('div');
+    outline.className = 'capture-region-outline';
+    Object.assign(outline.style, { left: `${left}px`, top: `${top}px`, width: `${region.width}px`, height: `${region.height}px` });
+    selectionArea.append(outline);
+  }
   selectionArea.classList.remove('hidden');
 }
 
@@ -120,7 +132,8 @@ function setStyle(nextSettings: OverlaySettings): void {
   document.documentElement.style.setProperty('--width', `${nextSettings.width}px`);
   document.documentElement.style.setProperty('--show-source', nextSettings.showSource ? 'block' : 'none');
 
-  box.classList.toggle('draggable', panelVisible);
+  box.classList.toggle('draggable', panelVisible && nextSettings.mode === 'one_large_area');
+  blockOverlays.configure(nextSettings, viewport);
   applyPlacement(nextSettings);
 }
 
@@ -138,6 +151,17 @@ function show(sourceText: string, translatedText: string | null, hideAfterMs: nu
     hideTimer = undefined;
   }
   applyPlacement(settings);
+}
+
+function showResult(result: DesktopTranslationResult): void {
+  if (settings.mode === 'one_large_area') {
+    show(result.combinedSourceText, result.combinedTranslatedText, settings.autoHideMs);
+  } else {
+    latestSourceText = result.combinedSourceText;
+    latestTranslatedText = result.combinedTranslatedText;
+    hide();
+    blockOverlays.show(result);
+  }
 }
 
 async function copyCurrentText(): Promise<void> {
@@ -199,6 +223,21 @@ function composeBackground(): string {
   return `rgba(${r},${g},${b},${alpha.toFixed(2)})`;
 }
 
+function syncSettingVisibility(nextSettings: Pick<OverlaySettings, 'mode' | 'showSource'>): void {
+  const manualPlacement = nextSettings.mode === 'one_large_area';
+  document.getElementById('setting-position-row')!.hidden = !manualPlacement;
+  document.getElementById('setting-width-row')!.hidden = nextSettings.mode === 'multiple_regions';
+  document.getElementById('setting-width-label')!.textContent = manualPlacement ? 'Width (px)' : 'Maximum card width (px)';
+  document.getElementById('mode-hint')!.textContent = manualPlacement
+    ? 'One combined translation box. Choose its position or drag it while settings are open.'
+    : nextSettings.mode === 'multiple_regions'
+      ? 'One translation card per selected area. Card width follows the area; position and height adjust automatically.'
+      : 'One translation card per detected text block. Cards are positioned automatically near the text.';
+  panel.querySelectorAll<HTMLElement>('[data-source-setting]').forEach((control) => {
+    control.hidden = !nextSettings.showSource;
+  });
+}
+
 function syncPanelFromSettings(): void {
   positionInput.value = settings.placementMode;
   widthInput.value = String(settings.width);
@@ -212,10 +251,10 @@ function syncPanelFromSettings(): void {
   backgroundAlphaInput.value = String(bg.alphaPercent);
   autoHideInput.value = String(settings.autoHideMs);
   ocrLangInput.value = settings.ocrLang || 'en';
-  clickthroughInput.checked = settings.clickthrough;
   captureModeInput.value = settings.mode;
   pollingMsInput.value = String(settings.polling_ms);
   targetLanguageInput.value = settings.targetLanguage;
+  syncSettingVisibility(settings);
 }
 
 function parsePanelSettings(): OverlaySettings {
@@ -231,7 +270,6 @@ function parsePanelSettings(): OverlaySettings {
     background: composeBackground(),
     autoHideMs: Number(autoHideInput.value || settings.autoHideMs),
     ocrLang: (ocrLangInput.value || settings.ocrLang || 'en') as OverlaySettings['ocrLang'],
-    clickthrough: clickthroughInput.checked,
     mode: captureModeInput.value as OverlaySettings['mode'],
     polling_ms: Number(pollingMsInput.value || settings.polling_ms),
     targetLanguage: targetLanguageInput.value as OverlaySettings['targetLanguage'],
@@ -242,24 +280,21 @@ async function persistSettings(next: OverlaySettings): Promise<void> {
   settings = await window.overlayApi.saveSettings(next);
   setStyle(settings);
   syncPanelFromSettings();
-  if (panelVisible) {
-    await window.overlayApi.setClickthrough(false);
-  }
 }
 
 async function persistFromPanel(): Promise<void> {
   const next = parsePanelSettings();
+  syncSettingVisibility(next);
   await persistSettings(next);
 }
 
 async function togglePanel(nextVisible: boolean): Promise<void> {
   panelVisible = nextVisible;
+  await window.overlayApi.setSelectionPreview(panelVisible);
   if (panelVisible) {
-    await window.overlayApi.setClickthrough(false);
-
     syncPanelFromSettings();
     panel.classList.remove('hidden');
-    box.classList.add('draggable');
+    box.classList.toggle('draggable', settings.mode === 'one_large_area');
     syncSelectionArea(settings);
 
     show('Overlay settings', 'Press Cmd/Ctrl+Shift+P to close', 4000);
@@ -269,13 +304,12 @@ async function togglePanel(nextVisible: boolean): Promise<void> {
     box.classList.remove('draggable');
     box.classList.remove('dragging');
     dragState = null;
-    await window.overlayApi.setClickthrough(settings.clickthrough);
   }
   applyPlacement(settings);
 }
 
 function startDrag(event: MouseEvent): void {
-  if (!panelVisible || event.button !== 0) return;
+  if (!panelVisible || settings.mode !== 'one_large_area' || event.button !== 0) return;
   event.preventDefault();
 
   if (settings.placementMode === 'above') {
@@ -356,7 +390,6 @@ function installPanelEvents(): void {
   backgroundAlphaInput.addEventListener('input', persist);
   autoHideInput.addEventListener('change', persist);
   ocrLangInput.addEventListener('change', persist);
-  clickthroughInput.addEventListener('change', persist);
   captureModeInput.addEventListener('change', persist);
   pollingMsInput.addEventListener('change', persist);
   targetLanguageInput.addEventListener('change', persist);
@@ -373,16 +406,23 @@ function installPanelEvents(): void {
     }
   });
   window.overlayApi.onTranslationResult((payload) => {
-    show(payload.combinedSourceText, payload.combinedTranslatedText, settings.autoHideMs);
+    showResult(payload);
   });
-  window.overlayApi.onTranslationClear(() => {
-    hide();
+  window.overlayApi.onTranslationClear((payload) => {
+    if (settings.mode === 'one_large_area') hide();
+    else blockOverlays.clear(payload.regionId, payload.sessionId, payload.frameId);
   });
+  window.overlayApi.onCaptureBounds(({ regionId, bounds }) => blockOverlays.move(regionId, bounds));
+  window.overlayApi.onSettings((next) => { settings = next; setStyle(settings); syncPanelFromSettings(); });
+  window.overlayApi.onSelectionPreview((visible) => { selectionPreviewVisible = visible; syncSelectionArea(settings); });
 
   box.addEventListener('mousedown', startDrag);
   window.addEventListener('mousemove', onDragMove);
   window.addEventListener('mouseup', endDrag);
-  window.addEventListener('resize', () => applyPlacement(settings));
+  window.addEventListener('resize', async () => {
+    viewport = await window.overlayApi.getViewport();
+    setStyle(settings);
+  });
 
   const resizeObserver = new ResizeObserver(() => {
     applyPlacement(settings);
@@ -411,13 +451,18 @@ function installPanelEvents(): void {
 (async () => {
   profileId = await window.overlayApi.getProfileId();
   settings = await window.overlayApi.getSettings();
+  viewport = await window.overlayApi.getViewport();
   setStyle(settings);
   installPanelEvents();
   const latest = await window.overlayApi.getLatestTranslations();
-  const current = latest.at(-1);
-  if (current) {
-    show(current.combinedSourceText, current.combinedTranslatedText, settings.autoHideMs);
+  if (settings.mode === 'one_large_area') {
+    const current = latest.at(-1);
+    if (current) {
+      show(current.combinedSourceText, current.combinedTranslatedText, settings.autoHideMs);
+    } else {
+      show('Overlay ready', `Profile: ${profileId}`, 5000);
+    }
   } else {
-    show('Overlay ready', `Profile: ${profileId}`, 5000);
+    latest.forEach(showResult);
   }
 })();

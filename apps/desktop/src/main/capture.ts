@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
-import { desktopCapturer, systemPreferences, type DesktopCapturerSource, type Display, type NativeImage } from 'electron';
-import type { CaptureRegion } from '../shared/types';
+import { type Display, type NativeImage } from 'electron';
+import type { CaptureRegion, DesktopRect, WindowChoice } from '../shared/types';
 import type { CapturedFrame } from './backend-client';
 import { MAX_IMAGE_BYTES } from './protocol';
+import { ScreenStream, captureWorkerPage } from './screen-stream';
+import { readWindowBounds } from './window-bounds';
+import { MacDisplayCapture } from './mac-display-capture';
 
 export type CaptureTarget = {
   regionId: string;
   display: Display;
   region?: CaptureRegion;
+  windowSource?: WindowChoice;
 };
 
 const MAX_LONG_EDGE = 3200;
@@ -62,60 +66,62 @@ function encodeWithinLimit(image: NativeImage): { image: NativeImage; jpeg: Buff
 
 export class DesktopCapture {
   private hashes = new Map<string, { value: string; repeats: number }>();
-  private emptyCaptureCounts = new Map<number, number>();
+  private streams = new Map<string, Pick<ScreenStream, 'capture' | 'dispose'>>();
 
-  private sourceForDisplay(sources: DesktopCapturerSource[], display: Display): DesktopCapturerSource | undefined {
-    return sources.find((candidate) => candidate.display_id === String(display.id))
-      ?? sources.find((candidate) => Boolean(display.label) && candidate.name.includes(display.label))
-      ?? (sources.length === 1 ? sources[0] : undefined);
-  }
+  constructor(private readonly workerPage = captureWorkerPage(),
+    private readonly onBounds?: (regionId: string, bounds: DesktopRect) => void,
+    private readonly excludedWindowIds: () => string[] = () => []) {}
 
-  private screenPermissionStatus(): string {
-    return process.platform === 'darwin'
-      ? systemPreferences.getMediaAccessStatus('screen')
-      : 'granted';
+  private async captureSource(target: CaptureTarget): Promise<NativeImage | null> {
+    const key = target.windowSource?.id || `display-${target.display.id}`;
+    let stream = this.streams.get(key);
+    if (!stream) {
+      stream = process.platform === 'darwin' && !target.windowSource
+        ? new MacDisplayCapture(target.display, this.excludedWindowIds)
+        : new ScreenStream(target.display, this.workerPage, target.windowSource?.id);
+      this.streams.set(key, stream);
+    }
+    try {
+      return await stream.capture();
+    } catch (error) {
+      stream.dispose();
+      if (this.streams.get(key) === stream) this.streams.delete(key);
+      throw error;
+    }
   }
 
   async capture(targets: CaptureTarget[]): Promise<CapturedFrame[]> {
     const results: CapturedFrame[] = [];
-    const byDisplay = new Map<number, CaptureTarget[]>();
+    const bySource = new Map<string, CaptureTarget[]>();
     for (const target of targets) {
-      const existing = byDisplay.get(target.display.id) ?? [];
+      const key = target.windowSource?.id || `display-${target.display.id}`;
+      const existing = bySource.get(key) ?? [];
       existing.push(target);
-      byDisplay.set(target.display.id, existing);
+      bySource.set(key, existing);
+    }
+    for (const [key, stream] of this.streams) {
+      if (!bySource.has(key)) {
+        stream.dispose();
+        this.streams.delete(key);
+      }
     }
 
-    for (const displayTargets of byDisplay.values()) {
-      const display = displayTargets[0].display;
-      const scale = captureCoordinateScale(display);
-      const thumbnailSize = {
-        width: Math.max(1, Math.round(display.bounds.width * scale)),
-        height: Math.max(1, Math.round(display.bounds.height * scale)),
-      };
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize,
-        fetchWindowIcons: false,
-      });
-      const source = this.sourceForDisplay(sources, display);
-      if (!source) {
-        const available = sources.map((candidate) => candidate.display_id || candidate.name).join(', ') || 'none';
-        throw new Error(`Display ${display.id} is unavailable; re-select the capture region (available: ${available})`);
-      }
-      if (source.thumbnail.isEmpty()) {
-        const permission = this.screenPermissionStatus();
-        if (permission !== 'granted') {
-          throw new Error(`Screen Recording permission is ${permission}; enable it in macOS System Settings and restart Electron`);
-        }
-        const emptyCount = (this.emptyCaptureCounts.get(display.id) ?? 0) + 1;
-        this.emptyCaptureCounts.set(display.id, emptyCount);
-        if (emptyCount < 3) continue;
-        throw new Error(`Display ${display.id} returned an empty screen capture despite granted permission`);
-      }
-      this.emptyCaptureCounts.delete(display.id);
+    for (const sourceTargets of bySource.values()) {
+      const display = sourceTargets[0].display;
+      const image = await this.captureSource(sourceTargets[0]);
+      if (!image) continue;
+      const windowBounds = sourceTargets[0].windowSource
+        ? await readWindowBounds(sourceTargets[0].windowSource.id) : undefined;
 
-      for (const target of displayTargets) {
-        const cropped = cropForTarget(source.thumbnail, target);
+      for (const target of sourceTargets) {
+        const cropped = cropForTarget(image, target);
+        const screenBoundsDip = target.windowSource ? windowBounds : target.region ? {
+          x: Math.max(display.bounds.x, target.region.left / captureCoordinateScale(display)),
+          y: Math.max(display.bounds.y, target.region.top / captureCoordinateScale(display)),
+          width: cropped.getSize().width / image.getSize().width * display.bounds.width,
+          height: cropped.getSize().height / image.getSize().height * display.bounds.height,
+        } : { ...display.bounds };
+        if (screenBoundsDip) this.onBounds?.(target.regionId, screenBoundsDip);
         const encoded = encodeWithinLimit(cropped);
         const hash = createHash('sha256').update(encoded.jpeg).digest('hex');
         const previous = this.hashes.get(target.regionId);
@@ -132,6 +138,19 @@ export class DesktopCapture {
           width: size.width,
           height: size.height,
           jpeg: encoded.jpeg,
+          geometry: target.windowSource ? {
+            sourceKind: 'window', windowId: target.windowSource.id, windowName: target.windowSource.name,
+            imageWidth: size.width, imageHeight: size.height,
+            screenBoundsDip,
+          } : {
+            sourceKind: 'display',
+            displayId: display.id,
+            displayBoundsDip: { ...display.bounds },
+            displayScaleFactor: display.scaleFactor,
+            imageWidth: size.width,
+            imageHeight: size.height,
+            screenBoundsDip,
+          },
         });
       }
     }
@@ -140,6 +159,11 @@ export class DesktopCapture {
 
   reset(): void {
     this.hashes.clear();
-    this.emptyCaptureCounts.clear();
+  }
+
+  stop(): void {
+    for (const stream of this.streams.values()) stream.dispose();
+    this.streams.clear();
+    this.reset();
   }
 }

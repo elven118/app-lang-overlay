@@ -91,9 +91,14 @@ export class ProfileStore {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error(`Profile ${existingId} must contain a JSON object`);
     }
-    const profile = parsed as DesktopProfile & { game_id?: unknown };
+    const profile = parsed as DesktopProfile;
     profile.profile_id = existingId;
-    delete profile.game_id;
+    const settings = profile.overlay_settings;
+    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+      const raw = settings as Record<string, unknown>;
+      if (raw.mode === 'full_screen') raw.mode = 'selected_window';
+    }
+    delete profile.full_screen_display_id;
     return profile;
   }
 
@@ -101,6 +106,7 @@ export class ProfileStore {
     const validated = validateProfileId(profileId);
     const saved: DesktopProfile = { ...profile, profile_id: validated };
     delete saved.game_id;
+    delete saved.full_screen_display_id;
     this.writeJson(this.pathFor(validated), saved);
     return saved;
   }

@@ -3,16 +3,20 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  desktopCapturer,
   Display,
   globalShortcut,
   ipcMain,
   Menu,
   MenuItemConstructorOptions,
   screen,
+  type Tray,
 } from "electron";
 import { DesktopStream } from "./main/backend-client";
 import { DesktopCapture, type CaptureTarget } from "./main/capture";
 import { ProfileStore } from "./main/profile-store";
+import { createAppTray } from "./main/tray";
+import { HoverWindowPicker } from "./main/window-picker";
 import type {
   CaptureMode,
   CaptureRegion,
@@ -23,6 +27,10 @@ import type {
   TargetLanguage,
   TranslationClear,
   TranslationResult,
+  DesktopTranslationResult,
+  DesktopRect,
+  WindowChoice,
+  PickerStart,
 } from "./shared/types";
 
 interface SelectionWindow extends BrowserWindow {
@@ -45,7 +53,7 @@ const DEFAULT_SETTINGS: OverlaySettings = {
     above: { xShift: 0, gapY: 0 },
     free: { x: 24, y: 24 },
   },
-  showSource: true,
+  showSource: false,
   width: 600,
   sourceFontSize: 12,
   translatedFontSize: 12,
@@ -53,8 +61,7 @@ const DEFAULT_SETTINGS: OverlaySettings = {
   textColor: "#ffffff",
   translateColor: "#ffd166",
   background: "rgba(0,0,0,0.35)",
-  autoHideMs: 5000,
-  clickthrough: true,
+  autoHideMs: -1,
   ocrLang: "en",
   targetLanguage: "zh-Hant",
   mode: "one_large_area",
@@ -114,7 +121,7 @@ function normalizeTargetLanguage(value: unknown): TargetLanguage {
 }
 
 function normalizeCaptureMode(value: unknown): CaptureMode {
-  return ["full_screen", "one_large_area", "multiple_regions"].includes(String(value || ""))
+  return ["selected_window", "one_large_area", "multiple_regions"].includes(String(value || ""))
     ? value as CaptureMode
     : DEFAULT_SETTINGS.mode;
 }
@@ -171,6 +178,7 @@ function normalizeOverlaySettings(
 
   const normalized = {
     ...DEFAULT_SETTINGS,
+    showSource: typeof raw.showSource === "boolean" ? raw.showSource : DEFAULT_SETTINGS.showSource,
     placementMode,
     placement,
     width,
@@ -180,8 +188,7 @@ function normalizeOverlaySettings(
       Math.round(asFiniteNumber(raw.translatedFontSize, DEFAULT_SETTINGS.translatedFontSize)),
     ),
     lineGap: Math.max(0, Math.round(asFiniteNumber(raw.lineGap, DEFAULT_SETTINGS.lineGap))),
-    autoHideMs: Math.max(300, Math.round(asFiniteNumber(raw.autoHideMs, DEFAULT_SETTINGS.autoHideMs))),
-    clickthrough: typeof raw.clickthrough === "boolean" ? raw.clickthrough : DEFAULT_SETTINGS.clickthrough,
+    autoHideMs: Math.max(-1, Math.round(asFiniteNumber(raw.autoHideMs, DEFAULT_SETTINGS.autoHideMs))),
     ocrLang: normalizeSourceLanguage(raw.ocrLang),
     targetLanguage: normalizeTargetLanguage(raw.targetLanguage),
     mode: normalizeCaptureMode(raw.mode),
@@ -201,8 +208,8 @@ function normalizeOverlaySettings(
   return normalized;
 }
 
-function settingsForProfile(settings: OverlaySettings): Omit<OverlaySettings, "backendUrl" | "backendToken"> {
-  const { backendUrl: _backendUrl, backendToken: _backendToken, ...profileSettings } = settings;
+function settingsForProfile(settings: OverlaySettings): Omit<OverlaySettings, "backendUrl" | "backendToken" | "captureRegions"> {
+  const { backendUrl: _backendUrl, backendToken: _backendToken, captureRegions: _captureRegions, ...profileSettings } = settings;
   return profileSettings;
 }
 
@@ -210,15 +217,24 @@ const profileStore = new ProfileStore(path.join(repoRoot, "data", "profiles"));
 let profileId = profileStore.resolveInitial(process.env.OVERLAY_DEFAULT_PROFILE);
 
 let overlayWindow: BrowserWindow | null = null;
+let secondaryOverlays: BrowserWindow[] = [];
 let controlWindow: BrowserWindow | null = null;
 let transcriptWindow: BrowserWindow | null = null;
 let selectionWindows: SelectionWindow[] = [];
+let areaPickerSettings: OverlaySettings | null = null;
+let windowPicker: HoverWindowPicker | null = null;
+// OS window IDs are temporary. Always ask again after restart/profile switch.
+let selectedWindowSource: WindowChoice | null = null;
 let appMenu: Menu | null = null;
+let tray: Tray | null = null;
 let quitting = false;
 let streamStatus: StreamStatus = { state: "offline", message: "Not connected" };
-const latestTranslations = new Map<string, TranslationResult>();
+const latestTranslations = new Map<string, DesktopTranslationResult>();
 const transcriptHistory: TranslationResult[] = [];
-const desktopCapture = new DesktopCapture();
+const captureBounds = new Map<string, DesktopRect>();
+const desktopCapture = new DesktopCapture(undefined, publishCaptureBounds, () =>
+  [overlayWindow, ...secondaryOverlays].filter((win): win is BrowserWindow => !!win && !win.isDestroyed())
+    .map((win) => win.getMediaSourceId().split(':')[1]));
 let desktopStream: DesktopStream | null = null;
 
 function getTargetDisplay(profile: Record<string, unknown>): Display {
@@ -263,11 +279,14 @@ function displayForCaptureRegion(region: CaptureRegion, fallback: Display): Disp
 }
 
 function getCaptureTargets(): CaptureTarget[] {
+  if (selectionWindows.length > 0 || windowPicker) return [];
   const profile = loadProfile(profileId);
   const settings = getOverlaySettings(profileId);
   const defaultDisplay = getTargetDisplay(profile);
-  if (settings.mode === "full_screen") {
-    return [{ regionId: `screen-${defaultDisplay.id}`, display: defaultDisplay }];
+  if (settings.mode === "selected_window") {
+    return selectedWindowSource ? [{
+      regionId: 'window-1', display: defaultDisplay, windowSource: selectedWindowSource,
+    }] : [];
   }
 
   const primaryRegion = normalizeCaptureRegion(profile.capture_region);
@@ -347,7 +366,7 @@ function ensureProfileExists(id: string): Record<string, unknown> {
 function hasCaptureRegion(id: string): boolean {
   const profile = loadProfile(id);
   const settings = getOverlaySettings(id);
-  if (settings.mode === "full_screen") return true;
+  if (settings.mode === "selected_window") return selectedWindowSource !== null;
   if (settings.mode === "multiple_regions" && normalizeCaptureRegions(profile.capture_regions).length > 0) {
     return true;
   }
@@ -378,7 +397,19 @@ function getOverlaySettings(id: string): OverlaySettings {
   }
   profile.overlay_settings = settingsForProfile(normalized);
   saveProfile(id, profile);
-  return normalized;
+  return withCaptureRegionPreviews(normalized, profile, targetDisplay);
+}
+
+function withCaptureRegionPreviews(settings: OverlaySettings, profile: Record<string, unknown>, fallback: Display): OverlaySettings {
+  if (settings.mode !== 'multiple_regions') return settings;
+  const saved = normalizeCaptureRegions(profile.capture_regions);
+  const primary = normalizeCaptureRegion(profile.capture_region);
+  const regions = saved.length ? saved : primary ? [primary] : [];
+  return { ...settings, captureRegions: regions.map((region) => {
+    const display = displayForCaptureRegion(region, fallback);
+    const scale = process.platform === 'win32' ? (display.scaleFactor || 1) : 1;
+    return { left: region.left / scale, top: region.top / scale, width: region.width / scale, height: region.height / scale };
+  }) };
 }
 
 function saveOverlaySettings(id: string, settings: OverlaySettings): OverlaySettings {
@@ -387,16 +418,17 @@ function saveOverlaySettings(id: string, settings: OverlaySettings): OverlaySett
   const normalized = normalizeOverlaySettings(settings, targetDisplay.bounds);
   profile.overlay_settings = settingsForProfile(normalized);
   saveProfile(id, profile);
-  return normalized;
+  return withCaptureRegionPreviews(normalized, profile, targetDisplay);
 }
 
 function saveCaptureRegion(
   id: string,
   region: CaptureRegion,
   pickerWindowBounds?: { x: number; y: number },
+  multipleRegions?: CaptureRegion[],
+  selectionSettings?: OverlaySettings,
 ): void {
   const profile = loadProfile(id);
-  const previousPrimaryRegion = normalizeCaptureRegion(profile.capture_region);
   const targetDisplay = screen.getDisplayNearestPoint({
     x: Math.round(region.left + region.width / 2),
     y: Math.round(region.top + region.height / 2),
@@ -407,22 +439,8 @@ function saveCaptureRegion(
   profile.capture_region = region;
   profile.capture_display_id = targetDisplay.id;
 
-  const currentSettings = normalizeOverlaySettings(profile.overlay_settings, targetDisplay.bounds);
-  if (currentSettings.mode === "multiple_regions") {
-    const existingRegions = normalizeCaptureRegions(profile.capture_regions);
-    const seededRegions = existingRegions.length > 0
-      ? existingRegions
-      : previousPrimaryRegion
-        ? [previousPrimaryRegion]
-        : [];
-    const duplicate = seededRegions.some((item) => (
-      item.left === region.left
-      && item.top === region.top
-      && item.width === region.width
-      && item.height === region.height
-    ));
-    profile.capture_regions = duplicate ? seededRegions : [...seededRegions, region];
-  }
+  const currentSettings = normalizeOverlaySettings(selectionSettings ?? profile.overlay_settings, targetDisplay.bounds);
+  if (currentSettings.mode === "multiple_regions" && multipleRegions) profile.capture_regions = multipleRegions;
 
   const displayBounds = targetDisplay.bounds;
   const originX = pickerWindowBounds?.x ?? displayBounds.x;
@@ -440,7 +458,7 @@ function saveCaptureRegion(
     height: Math.max(1, Math.round(heightDip)),
   };
 
-  const existing = normalizeOverlaySettings(profile.overlay_settings, displayBounds);
+  const existing = currentSettings;
   const normalized = normalizeOverlaySettings({
     ...existing,
     placementMode: existing.placementMode || "free",
@@ -460,12 +478,11 @@ function saveCaptureRegion(
   saveProfile(id, profile);
 }
 
-function applyClickthrough(enabled: boolean): boolean {
-  if (!overlayWindow || overlayWindow.isDestroyed()) {
-    return false;
+function setOverlayInteraction(settingsVisible: boolean): void {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.setIgnoreMouseEvents(!settingsVisible, { forward: true });
   }
-  overlayWindow.setIgnoreMouseEvents(enabled, { forward: true });
-  return enabled;
+  secondaryOverlays.forEach((win) => { if (!win.isDestroyed()) win.setIgnoreMouseEvents(true, { forward: true }); });
 }
 
 function sendToDesktopRenderers(channel: string, payload: unknown): void {
@@ -476,7 +493,8 @@ function sendToDesktopRenderers(channel: string, payload: unknown): void {
   }
 }
 
-function publishTranslation(result: TranslationResult): void {
+function publishTranslation(result: DesktopTranslationResult): void {
+  result = { ...result, captureBounds: captureBounds.get(result.regionId) ?? result.captureBounds };
   latestTranslations.set(result.regionId, result);
   const previous = transcriptHistory.at(-1);
   if (!previous || previous.dedupeKey !== result.dedupeKey || previous.regionId !== result.regionId) {
@@ -486,12 +504,22 @@ function publishTranslation(result: TranslationResult): void {
   sendToDesktopRenderers("translation:result", result);
 }
 
+function publishCaptureBounds(regionId: string, bounds: DesktopRect): void {
+  const previous = captureBounds.get(regionId);
+  if (previous && JSON.stringify(previous) === JSON.stringify(bounds)) return;
+  captureBounds.set(regionId, bounds);
+  const latest = latestTranslations.get(regionId);
+  if (latest) latest.captureBounds = bounds;
+  sendToDesktopRenderers('capture:bounds', { regionId, bounds });
+}
+
 function publishClear(message: TranslationClear): void {
   latestTranslations.delete(message.regionId);
   sendToDesktopRenderers("translation:clear", message);
 }
 
 function publishStreamStatus(status: StreamStatus): void {
+  if (status.state === 'paused' || status.state === 'offline') desktopCapture.stop();
   streamStatus = status;
   sendToDesktopRenderers("stream:status", status);
 }
@@ -511,6 +539,8 @@ function publishProfileState(): ProfileState {
 
 function activateProfile(nextProfileId: string): ProfileState {
   closeRegionPickerWindows();
+  selectedWindowSource = null;
+  captureBounds.clear();
   profileId = profileStore.setActive(nextProfileId);
   ensureProfileExists(profileId);
   latestTranslations.clear();
@@ -521,13 +551,13 @@ function activateProfile(nextProfileId: string): ProfileState {
   if (transcriptWindow && !transcriptWindow.isDestroyed()) {
     transcriptWindow.webContents.reloadIgnoringCache();
   }
-  applyClickthrough(getOverlaySettings(profileId).clickthrough);
+  if (!hasCaptureRegion(profileId)) void openRegionPickerWindows();
   return publishProfileState();
 }
 
-function createOverlayWindow(): BrowserWindow {
+function createOverlayWindow(display?: Display): BrowserWindow {
   const profile = loadProfile(profileId);
-  const targetDisplay = getTargetDisplay(profile);
+  const targetDisplay = display ?? getTargetDisplay(profile);
   const bounds = targetDisplay.bounds;
   const win = new BrowserWindow({
     x: bounds.x,
@@ -536,6 +566,7 @@ function createOverlayWindow(): BrowserWindow {
     height: bounds.height,
     frame: false,
     transparent: true,
+    show: process.platform !== 'win32',
     alwaysOnTop: true,
     hasShadow: false,
     resizable: false,
@@ -549,6 +580,10 @@ function createOverlayWindow(): BrowserWindow {
     },
   });
 
+  if (process.platform === 'win32') {
+    win.setContentProtection(true);
+    win.show();
+  }
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, "renderer/overlay/index.html"));
   win.webContents.on("before-input-event", (event, input) => {
@@ -558,8 +593,7 @@ function createOverlayWindow(): BrowserWindow {
     }
   });
 
-  const settings = getOverlaySettings(profileId);
-  win.setIgnoreMouseEvents(settings.clickthrough, { forward: true });
+  win.setIgnoreMouseEvents(true, { forward: true });
 
   return win;
 }
@@ -592,11 +626,7 @@ function createControlWindow(): BrowserWindow {
       return;
     }
     event.preventDefault();
-    if (process.platform === "darwin") {
-      win.hide();
-    } else {
-      win.minimize();
-    }
+    win.hide();
   });
 
   return win;
@@ -680,7 +710,6 @@ function refreshOverlayWindowForProfile(): void {
 
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = createOverlayWindow();
-    return;
   }
 
   overlayWindow.setBounds({
@@ -690,11 +719,57 @@ function refreshOverlayWindowForProfile(): void {
     height: bounds.height,
   });
   overlayWindow.webContents.reloadIgnoringCache();
+  refreshSecondaryOverlays();
 }
 
-async function openRegionPickerWindows() {
-  closeRegionPickerWindows();
+function refreshSecondaryOverlays(): void {
+  secondaryOverlays.forEach((win) => { if (!win.isDestroyed()) win.destroy(); });
+  secondaryOverlays = [];
+  if (getOverlaySettings(profileId).mode === 'one_large_area') return;
+  const primary = getTargetDisplay(loadProfile(profileId));
+  secondaryOverlays = screen.getAllDisplays().filter((display) => display.id !== primary.id)
+    .map((display) => createOverlayWindow(display));
+}
 
+async function listCaptureWindows(): Promise<WindowChoice[]> {
+  const ownIds = new Set(BrowserWindow.getAllWindows()
+    .filter((win) => !win.isDestroyed()).map((win) => win.getMediaSourceId()));
+  const sources = await desktopCapturer.getSources({
+    types: ['window'], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false,
+  });
+  return sources.filter((source) => !ownIds.has(source.id) && source.id.startsWith('window:'))
+    .map(({ id, name }) => ({ id, name: name || 'Untitled window' }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function openRegionPickerWindows(captureSettings = getOverlaySettings(profileId)) {
+  closeRegionPickerWindows();
+  if (captureSettings.mode === 'selected_window') {
+    const picker = new HoverWindowPicker(__dirname, async (windowId) => {
+      const source = (await listCaptureWindows()).find((choice) => choice.id.split(':')[1] === String(windowId));
+      if (!source) throw new Error('That window is no longer available. Hover over another window.');
+      if (windowPicker !== picker) return;
+      selectedWindowSource = source;
+      captureBounds.clear();
+      saveOverlaySettings(profileId, captureSettings);
+      closeRegionPickerWindows();
+      latestTranslations.clear();
+      desktopCapture.stop();
+      desktopStream?.refreshCapture();
+      refreshOverlayWindowForProfile();
+      publishProfileState();
+    });
+    windowPicker = picker;
+    picker.onCancel = () => { if (windowPicker === picker) closeRegionPickerWindows(); };
+    try { await picker.start(); }
+    catch (error) {
+      if (windowPicker === picker) windowPicker = null;
+      throw error;
+    }
+    return;
+  }
+
+  areaPickerSettings = captureSettings;
   const displays = screen.getAllDisplays();
 
   selectionWindows = displays.map((display, index) => {
@@ -725,11 +800,7 @@ async function openRegionPickerWindows() {
 
     if (displays.length === 1) {
       win.webContents.once("did-finish-load", () => {
-        win.webContents.send("picker:start-drag", {
-          originX: display.bounds.x,
-          originY: display.bounds.y,
-          captureScaleFactor: process.platform === "win32" ? (display.scaleFactor || 1) : 1,
-        });
+        win.webContents.send("picker:start-drag", pickerStartPayload(win));
       });
     }
 
@@ -747,7 +818,27 @@ async function openRegionPickerWindows() {
   });
 }
 
+function pickerStartPayload(win: SelectionWindow): PickerStart {
+  const display = win.display!;
+  const bounds = win.getBounds();
+  const profile = loadProfile(profileId);
+  const multiple = (areaPickerSettings ?? getOverlaySettings(profileId)).mode === 'multiple_regions';
+  const saved = normalizeCaptureRegions(profile.capture_regions);
+  const primary = normalizeCaptureRegion(profile.capture_region);
+  const regions = multiple ? (saved.length ? saved : primary ? [primary] : []) : [];
+  const local = regions.filter((region) => displayForCaptureRegion(region, display).id === display.id);
+  return { originX: bounds.x, originY: bounds.y,
+    captureScaleFactor: process.platform === 'win32' ? (display.scaleFactor || 1) : 1,
+    multiple, regions: local, otherRegionCount: regions.length - local.length };
+}
+
 function closeRegionPickerWindows(): void {
+  setOverlayInteraction(false);
+  sendToDesktopRenderers('overlay:selection-preview', false);
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send('overlay:close-panel');
+  areaPickerSettings = null;
+  windowPicker?.dispose();
+  windowPicker = null;
   selectionWindows.forEach((win) => {
     if (!win.isDestroyed()) {
       win.close();
@@ -757,20 +848,32 @@ function closeRegionPickerWindows(): void {
 }
 
 ipcMain.handle("overlay:get-settings", () => getOverlaySettings(profileId));
+ipcMain.handle('overlay:set-selection-preview', (event, visible: boolean) => {
+  if (event.sender !== overlayWindow?.webContents) return;
+  setOverlayInteraction(Boolean(visible));
+  sendToDesktopRenderers('overlay:selection-preview', Boolean(visible));
+});
+ipcMain.handle('overlay:get-viewport', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) throw new Error('Overlay window is unavailable');
+  const bounds = win.getBounds();
+  return { bounds, workArea: screen.getDisplayMatching(bounds).workArea };
+});
 
 ipcMain.handle("overlay:save-settings", (_event, payload: OverlaySettings) => {
   const previous = getOverlaySettings(profileId);
+  if (payload.mode !== previous.mode) {
+    // Every mode change chooses its capture target before committing settings.
+    void openRegionPickerWindows(payload);
+    return previous;
+  }
   const saved = saveOverlaySettings(profileId, payload);
-  applyClickthrough(saved.clickthrough);
+  if (previous.mode !== saved.mode) { captureBounds.clear(); latestTranslations.clear(); }
   desktopCapture.reset();
   desktopStream?.applySettings(previous, saved);
+  sendToDesktopRenderers('overlay:settings', saved);
+  if (previous.mode !== saved.mode) setImmediate(refreshOverlayWindowForProfile);
   return saved;
-});
-
-ipcMain.handle("overlay:set-clickthrough", (_event, enabled: boolean) => {
-  const current = getOverlaySettings(profileId);
-  const saved = saveOverlaySettings(profileId, { ...current, clickthrough: Boolean(enabled) });
-  return applyClickthrough(saved.clickthrough);
 });
 
 ipcMain.handle("profile:get-active", () => profileId);
@@ -827,17 +930,9 @@ ipcMain.handle("control:show-transcript", () => {
   showTranscriptWindow();
   return true;
 });
-ipcMain.handle("control:toggle-clickthrough", () => {
-  const settings = getOverlaySettings(profileId);
-  const next = !settings.clickthrough;
-  saveOverlaySettings(profileId, { ...settings, clickthrough: next });
-  applyClickthrough(next);
-  return next;
-});
-
 ipcMain.on("picker:selected", (event) => {
   const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
-  if (!selectedWindow || selectedWindow.isDestroyed()) {
+  if (!selectedWindow || selectedWindow.isDestroyed() || !selectionWindows.includes(selectedWindow)) {
     return;
   }
 
@@ -849,27 +944,45 @@ ipcMain.on("picker:selected", (event) => {
 
   selectionWindows = [selectedWindow];
   selectedWindow.focus();
-  const bounds = selectedWindow.getBounds();
-  selectedWindow.webContents.send("picker:start-drag", {
-    originX: bounds.x,
-    originY: bounds.y,
-    captureScaleFactor: process.platform === "win32" ? (selectedWindow.display?.scaleFactor ?? 1) : 1,
-  });
+  selectedWindow.webContents.send("picker:start-drag", pickerStartPayload(selectedWindow));
 });
 
-ipcMain.handle("picker:submit", (event, region: CaptureRegion) => {
-  if (region.width <= 0 || region.height <= 0) {
-    return { status: "invalid" };
-  }
-
+ipcMain.handle("picker:submit", (event, value: unknown) => {
   const selectedWindow = BrowserWindow.fromWebContents(event.sender) as SelectionWindow | null;
-  const pickerBounds = selectedWindow && !selectedWindow.isDestroyed() ? selectedWindow.getBounds() : undefined;
+  if (!selectedWindow || selectedWindow.isDestroyed() || !selectionWindows.includes(selectedWindow) || !selectedWindow.display) {
+    return { status: 'invalid' };
+  }
+  const selectionSettings = areaPickerSettings ?? getOverlaySettings(profileId);
+  const multiple = selectionSettings.mode === 'multiple_regions';
+  if (multiple !== Array.isArray(value)) return { status: 'invalid' };
+  const submitted = Array.isArray(value) ? value : [value];
+  const pickerBounds = selectedWindow.getBounds();
+  const scale = process.platform === 'win32' ? (selectedWindow.display.scaleFactor || 1) : 1;
+  const regions = submitted.map(normalizeCaptureRegion);
+  if (regions.some((r) => !r || r.width < 20 * scale || r.height < 20 * scale ||
+    r.left < pickerBounds.x * scale || r.top < pickerBounds.y * scale ||
+    r.left + r.width > (pickerBounds.x + pickerBounds.width) * scale ||
+    r.top + r.height > (pickerBounds.y + pickerBounds.height) * scale)) return { status: 'invalid' };
+  const unique = [...new Map((regions as CaptureRegion[]).map((r) => [JSON.stringify(r), r])).values()];
+  const profile = loadProfile(profileId);
+  const savedRegions = normalizeCaptureRegions(profile.capture_regions);
+  const primaryRegion = normalizeCaptureRegion(profile.capture_region);
+  const existing = savedRegions.length ? savedRegions : primaryRegion ? [primaryRegion] : [];
+  const otherRegions = multiple ? existing.filter((r) =>
+    displayForCaptureRegion(r, selectedWindow.display!).id !== selectedWindow.display!.id) : [];
+  const allRegions = [...otherRegions, ...unique];
+  const region = unique[0] ?? otherRegions[0];
+  if (!region) return { status: 'invalid' };
 
-  saveCaptureRegion(profileId, region, pickerBounds);
+  // One profile write commits the entire edited set. Cancel never writes drafts.
+  saveCaptureRegion(profileId, region, unique.length ? pickerBounds : undefined, multiple ? allRegions : undefined, selectionSettings);
+  latestTranslations.clear();
+  captureBounds.clear();
   desktopCapture.reset();
   desktopStream?.refreshCapture();
   refreshOverlayWindowForProfile();
   closeRegionPickerWindows();
+  publishProfileState();
 
   return {
     status: "ok",
@@ -889,20 +1002,11 @@ const template: MenuItemConstructorOptions[] = [
     label: "Overlay",
     submenu: [
       {
-        label: "Pick Capture Region",
+        label: "Choose Capture Target",
         click: () => {
           if (selectionWindows.length === 0) {
             void openRegionPickerWindows();
           }
-        },
-      },
-      {
-        label: "Toggle Clickthrough",
-        click: () => {
-          const settings = getOverlaySettings(profileId);
-          const next = !settings.clickthrough;
-          saveOverlaySettings(profileId, { ...settings, clickthrough: next });
-          applyClickthrough(next);
         },
       },
       {
@@ -941,8 +1045,7 @@ const template: MenuItemConstructorOptions[] = [
 
 app.whenReady().then(() => {
   if (process.platform === "darwin") {
-    app.setActivationPolicy("regular");
-    app.dock?.show();
+    app.setActivationPolicy("accessory");
   }
 
   ensureProfileExists(profileId);
@@ -966,9 +1069,10 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(appMenu);
 
   overlayWindow = createOverlayWindow();
+  refreshSecondaryOverlays();
   controlWindow = createControlWindow();
   transcriptWindow = createTranscriptWindow();
-  showControlWindow();
+  tray = createAppTray(showControlWindow, () => app.quit());
 
   desktopStream = new DesktopStream({
     appVersion: app.getVersion(),
@@ -987,15 +1091,18 @@ app.whenReady().then(() => {
   }
 });
 
-app.on("activate", () => {
-  showControlWindow();
-});
+// Keep the tray available even if every application window has been closed.
+app.on('window-all-closed', () => {});
 
 app.on("before-quit", () => {
   quitting = true;
+  closeRegionPickerWindows();
   desktopStream?.stop();
+  desktopCapture.stop();
 });
 
 app.on("will-quit", () => {
+  tray?.destroy();
+  tray = null;
   globalShortcut.unregisterAll();
 });

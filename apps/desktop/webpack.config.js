@@ -1,5 +1,7 @@
 const path = require("node:path");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
 
 const baseConfig = {
   mode: "production",
@@ -32,6 +34,20 @@ const mainConfig = {
   entry: {
     main: "./src/main.ts",
   },
+  plugins: [{ apply(compiler) {
+    compiler.hooks.afterEmit.tap('BuildNativeHelpers', () => {
+      if (process.platform !== 'darwin') return;
+      const output = path.join(__dirname, 'dist/native');
+      fs.mkdirSync(output, { recursive: true });
+      execFileSync('xcrun', ['clang', '-fobjc-arc', '-O2',
+        path.join(__dirname, 'native/window-picker.m'), '-framework', 'Foundation',
+        '-framework', 'CoreGraphics', '-o', path.join(output, 'window-picker')], { stdio: 'inherit' });
+      execFileSync('xcrun', ['clang', '-fobjc-arc', '-O2',
+        path.join(__dirname, 'native/display-capture.m'), '-framework', 'Foundation',
+        '-framework', 'ScreenCaptureKit', '-framework', 'ImageIO', '-framework', 'CoreGraphics',
+        '-o', path.join(output, 'display-capture')], { stdio: 'inherit' });
+    });
+  } }],
   output: {
     ...baseConfig.output,
     filename: "[name].js",
@@ -60,6 +76,8 @@ const rendererConfig = {
   ...baseConfig,
   target: "web",
   entry: {
+    "renderer/window-picker/window-picker": "./src/renderer/window-picker/window-picker.ts",
+    "renderer/capture/capture": "./src/renderer/capture/capture.ts",
     "renderer/overlay/overlay": "./src/renderer/overlay/overlay.ts",
     "renderer/picker/picker": "./src/renderer/picker/picker.ts",
     "renderer/control/control": "./src/renderer/control/control.ts",

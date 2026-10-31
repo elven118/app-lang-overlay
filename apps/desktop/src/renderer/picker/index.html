@@ -12,6 +12,14 @@
 
 <body>
   <p id="hint">Please click on the display you want to capture.</p>
+  <div id="toolbar" hidden data-picker-control>
+    <span id="region-count"></span>
+    <button id="undo" type="button">Undo</button>
+    <button id="clear" type="button">Clear this screen</button>
+    <button id="apply" type="button">Apply regions</button>
+    <button id="cancel" type="button">Cancel</button>
+  </div>
+  <div id="saved-regions"></div>
   <div id="selection"></div>
   <div id="coords"></div>
   <script src="./picker.js"></script>

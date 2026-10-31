@@ -39,7 +39,6 @@ html, body {
 
 .line {
   line-height: 1.2;
-  text-align: center;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -56,7 +55,29 @@ html, body {
   margin-top: var(--line-gap); 
 }
 
+#block-overlays { position: fixed; inset: 0; pointer-events: none; }
+.block-overlay {
+  position: absolute;
+  width: max-content;
+  height: auto;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg);
+  backdrop-filter: blur(2px);
+  overflow: auto;
+}
+.block-overlay[hidden] { display: none; }
+.block-overlay .line { text-align: left; writing-mode: horizontal-tb; }
+.block-source { display: var(--show-source); font-size: var(--source-font-size); color: var(--text-color); }
+.block-translation { font-size: var(--translated-font-size); color: var(--translate-color); margin-top: var(--line-gap); }
+
 #selection-area {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.capture-region-outline {
   position: fixed;
   border: 2px solid #4da3ff;
   background: rgba(77, 163, 255, 0.25);
@@ -82,6 +103,8 @@ html, body {
 }
 
 #settings-panel.hidden { display: none; }
+#settings-panel [hidden] { display: none !important; }
+.mode-hint { margin: 0; color: #bac6d2; line-height: 1.4; }
 
 .panel-title {
   font-size: 13px;

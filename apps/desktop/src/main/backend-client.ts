@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { type CaptureGeometry } from './ocr-positions';
 import type {
   OverlaySettings,
   StreamStatus,
   TranslationClear,
-  TranslationResult,
+  DesktopTranslationResult,
 } from '../shared/types';
 import {
   encodeImageEnvelope,
@@ -39,13 +40,14 @@ export type CapturedFrame = {
   width: number;
   height: number;
   jpeg: Buffer;
+  geometry?: CaptureGeometry;
 };
 
 type DesktopStreamOptions = {
   appVersion: string;
   getSettings: () => OverlaySettings;
   captureFrames: () => Promise<CapturedFrame[]>;
-  onResult: (result: TranslationResult) => void;
+  onResult: (result: DesktopTranslationResult) => void;
   onClear: (message: TranslationClear) => void;
   onStatus: (status: StreamStatus) => void;
 };
@@ -86,6 +88,7 @@ export class DesktopStream {
   private captureFailed = false;
   private endpoint = '';
   private latestResultFrame = new Map<string, bigint>();
+  private frameGeometry = new Map<string, CaptureGeometry>();
 
   constructor(private readonly options: DesktopStreamOptions) {}
 
@@ -175,6 +178,7 @@ export class DesktopStream {
     this.ready = false;
     this.sessionId = `desktop-${randomUUID()}`;
     this.latestResultFrame.clear();
+    this.frameGeometry.clear();
 
     const settings = this.options.getSettings();
     try {
@@ -265,7 +269,11 @@ export class DesktopStream {
       const accepted = this.latestResultFrame.get(message.regionId) ?? -1n;
       if (frame <= accepted) return;
       this.latestResultFrame.set(message.regionId, frame);
-      this.options.onResult(message);
+      const geometry = this.frameGeometry.get(message.frameId);
+      this.frameGeometry.delete(message.frameId);
+      const captureBounds = geometry?.screenBoundsDip ??
+        (geometry?.sourceKind === 'display' ? geometry.displayBoundsDip : undefined);
+      this.options.onResult({ ...message, captureBounds });
       return;
     }
 
@@ -300,8 +308,10 @@ export class DesktopStream {
       return;
     }
     this.captureRunning = true;
+    const captureSessionId = this.sessionId;
     try {
       const frames = await this.options.captureFrames();
+      if (captureSessionId !== this.sessionId) return;
       if (this.captureFailed) {
         this.captureFailed = false;
         this.report({ state: 'online', message: 'Connected' });
@@ -310,6 +320,13 @@ export class DesktopStream {
         if (!this.ready || this.paused || !this.socket || this.socket.readyState !== WebSocketClient.OPEN) break;
         this.frameNumber += 1n;
         const frameId = this.frameNumber.toString();
+        if (frame.geometry) {
+          this.frameGeometry.set(frameId, frame.geometry);
+          // Results may skip queued frames; retain only bounded metadata, never images.
+          if (this.frameGeometry.size > 256) {
+            this.frameGeometry.delete(this.frameGeometry.keys().next().value!);
+          }
+        }
         const header: FrameImageHeader = {
           type: 'frame.image',
           sessionId: this.sessionId,
@@ -327,6 +344,8 @@ export class DesktopStream {
         this.socket.send(encodeImageEnvelope(header, frame.jpeg));
       }
     } catch (error) {
+      // Stopping/replacing a capture worker intentionally rejects pending work.
+      if (this.stopped || this.paused || !this.ready || captureSessionId !== this.sessionId) return;
       const message = error instanceof Error ? error.message : 'Screen capture failed';
       if (!this.captureFailed) {
         console.error('[desktop-capture]', error);

@@ -10,7 +10,6 @@ const renameProfileButton = document.getElementById("btn-rename-profile") as HTM
 const pickRegionButton = document.getElementById("btn-pick-region") as HTMLButtonElement;
 const togglePauseButton = document.getElementById("btn-toggle-pause") as HTMLButtonElement;
 const showTranscriptButton = document.getElementById("btn-show-transcript") as HTMLButtonElement;
-const toggleClickthroughButton = document.getElementById("btn-toggle-clickthrough") as HTMLButtonElement;
 const toggleSettingsButton = document.getElementById("btn-toggle-settings") as HTMLButtonElement;
 
 function setStatus(text: string): void {
@@ -57,11 +56,12 @@ async function refreshStatus(): Promise<void> {
     window.controlApi.getStreamStatus(),
     window.controlApi.getPaused(),
   ]);
-  const clickthrough = settings.clickthrough ? "ON" : "OFF";
   renderProfiles(profiles);
   togglePauseButton.textContent = paused ? "Resume Capture" : "Pause Capture";
+  pickRegionButton.textContent = settings.mode === 'selected_window' ? 'Choose Window'
+    : settings.mode === 'multiple_regions' ? 'Edit Capture Regions' : 'Pick Capture Region';
   setStatus(
-    `Profile: ${profiles.activeProfileId} | ${status.state}: ${status.message} | Mode: ${settings.mode} | Poll: ${settings.polling_ms} ms | OCR: ${settings.ocrLang} | Clickthrough: ${clickthrough}`,
+    `Profile: ${profiles.activeProfileId} | ${status.state}: ${status.message} | Mode: ${settings.mode} | Poll: ${settings.polling_ms} ms | OCR: ${settings.ocrLang}`,
   );
 }
 
@@ -81,14 +81,9 @@ renameProfileButton.addEventListener('click', () => {
 });
 
 pickRegionButton.addEventListener("click", async () => {
-  setStatus("Opening region picker...");
+  setStatus("Opening capture picker...");
   await window.controlApi.pickRegion();
   await refreshStatus();
-});
-
-toggleClickthroughButton.addEventListener("click", async () => {
-  const enabled = await window.controlApi.toggleClickthrough();
-  setStatus(`Clickthrough: ${enabled ? "ON" : "OFF"}`);
 });
 
 togglePauseButton.addEventListener("click", async () => {

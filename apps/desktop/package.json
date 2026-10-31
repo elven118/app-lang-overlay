@@ -10,7 +10,6 @@
     "test:ipc": "node --test test/ipc.contract.test.js"
   },
   "dependencies": {
-    "electron-store": "^10.0.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
