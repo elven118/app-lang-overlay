@@ -54,6 +54,37 @@ def text_frame(frame_id: str, text: str = "こんにちは", region_id: str = "s
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_alignment_failure_sends_error_without_clear_and_can_retry(self) -> None:
+        class Translator(StubTranslationProvider):
+            bad = False
+            async def translate_blocks(self, blocks, source_language, target_language):
+                if self.bad:
+                    return {"wrong-block": "must not appear"}
+                return await super().translate_blocks(blocks, source_language, target_language)
+
+        translator = Translator()
+        self.gateway.pipeline.translator = translator
+        async with self.open() as websocket:
+            await self.hello_and_start(websocket)
+            await websocket.send(json.dumps(text_frame("1", "First")))
+            first = json.loads(await websocket.recv())
+            self.assertEqual(first["type"], "translation.result")
+            self.assertEqual(first["blocks"][0]["translatedText"], "[zh-Hant] First")
+            translator.bad = True
+            await websocket.send(json.dumps(text_frame("2", "Changed")))
+            error = json.loads(await websocket.recv())
+            self.assertEqual(error["type"], "error")
+            self.assertEqual(error["code"], "translation_alignment_failed")
+            self.assertEqual(error["frameId"], "2")
+            self.assertTrue(error["retryable"])
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(websocket.recv(), timeout=0.05)
+            translator.bad = False
+            await websocket.send(json.dumps(text_frame("3", "Changed")))
+            retry = json.loads(await websocket.recv())
+            self.assertEqual(retry["type"], "translation.result")
+            self.assertEqual(retry["blocks"][0]["translatedText"], "[zh-Hant] Changed")
+
     async def asyncSetUp(self) -> None:
         self.settings = BackendSettings(api_token="secret")
         self.registry = SessionRegistry()

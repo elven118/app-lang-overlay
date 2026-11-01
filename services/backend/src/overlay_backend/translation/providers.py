@@ -4,11 +4,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Protocol
 from urllib import request
 
 from ..config import BackendSettings, PROJECT_ROOT
-from ..domain import TextBlock
+from ..domain import ProtocolError, TextBlock
 from .language_mapping import target_language_name
 
 
@@ -23,14 +24,36 @@ class TranslationProvider(Protocol):
     ) -> dict[str, str]: ...
 
 
-def _prompt(blocks: list[TextBlock], source_language: str, target_language: str) -> str:
-    source_text = "\n".join(item.text.strip() for item in blocks if item.text.strip())
+class TranslationAlignmentError(ProtocolError):
+    def __init__(self) -> None:
+        super().__init__(
+            "translation_alignment_failed",
+            "Translator must return one non-empty translation for every source block ID",
+            retryable=True,
+        )
+
+
+def validate_translations(value: object, blocks: list[TextBlock]) -> dict[str, str]:
+    expected = {block.id for block in blocks}
+    if (len(expected) != len(blocks) or not isinstance(value, dict) or set(value) != expected
+            or any(not isinstance(text, str) or not text.strip() for text in value.values())):
+        raise TranslationAlignmentError()
+    return {identifier: text.strip() for identifier, text in value.items()}
+
+
+def _translation_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise TranslationAlignmentError()
+    return value.strip()
+
+
+def _prompt(text: str, source_language: str, target_language: str) -> str:
     target_language = target_language_name(target_language)
     return (
         "You are a translator.\n"
         f"Translate from {source_language} to {target_language}.\n"
-        "Return only the translated text.\n"
-        f"Input:\n{source_text}\n"
+        "Return only the translated text, without reasoning, markdown or commentary.\n"
+        f"Input:\n{text}\n"
         "Output:"
     )
 
@@ -39,8 +62,9 @@ class LocalLlamaProvider:
     def __init__(self, model_path: str) -> None:
         path = Path(model_path).expanduser()
         self._model_path = path if path.is_absolute() else PROJECT_ROOT / path
-        self.revision = f"llama:{self._model_path.name}"
+        self.revision = f"llama-per-block-v3:{self._model_path.name}"
         self._llm = None
+        self._lock = Lock()
 
     def _load(self) -> object:
         if self._llm is not None:
@@ -61,17 +85,25 @@ class LocalLlamaProvider:
         return self._llm
 
     def _translate_sync(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
-        if not blocks:
-            return {}
-        output = self._load()(
-            _prompt(blocks, source_language, target_language),
-            max_tokens=int(os.getenv("OVERLAY_LLM_MAX_TOKENS", "1024")),
-            temperature=0.1,
-        )
-        translated = str(output["choices"][0]["text"]).strip()
-        if not translated:
-            raise RuntimeError("Translator returned an empty translation")
-        return {"__combined__": translated}
+        translations: dict[str, str] = {}
+        for block in blocks:
+            # IDs stay in backend code. The model sees one block's text only.
+            # Serialize access to the shared llama.cpp context across sessions.
+            with self._lock:
+                output = self._load()(
+                    _prompt(block.text, source_language, target_language),
+                    max_tokens=int(os.getenv("OVERLAY_LLM_MAX_TOKENS", "1024")),
+                    temperature=0.1,
+                )
+            try:
+                choice = output["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    raise TranslationAlignmentError()
+                translated = choice["text"]
+            except (TypeError, KeyError, IndexError):
+                raise TranslationAlignmentError() from None
+            translations[block.id] = _translation_text(translated)
+        return validate_translations(translations, blocks)
 
     async def translate_blocks(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
         return await asyncio.to_thread(self._translate_sync, blocks, source_language, target_language)
@@ -81,15 +113,19 @@ class RemoteHttpProvider:
     def __init__(self, url: str, token: str = "") -> None:
         self._url = url
         self._token = token
-        self.revision = f"remote-http-v1:{url}"
+        self.revision = f"remote-http-per-block-v3:{url}"
 
     def _translate_sync(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
-        source_text = "\n".join(item.text.strip() for item in blocks if item.text.strip())
-        if not source_text:
-            return {}
+        translations = {
+            block.id: self._translate_text(block.text, source_language, target_language)
+            for block in blocks
+        }
+        return validate_translations(translations, blocks)
+
+    def _translate_text(self, text: str, source_language: str, target_language: str) -> str:
         payload = json.dumps(
             {
-                "text": source_text,
+                "text": text,
                 "source_lang": source_language,
                 "target_lang": target_language,
             },
@@ -100,15 +136,13 @@ class RemoteHttpProvider:
             headers["Authorization"] = f"Bearer {self._token}"
         req = request.Request(self._url, data=payload, headers=headers, method="POST")
         with request.urlopen(req, timeout=20) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        translated = (
-            str(body.get("translated_text") or body.get("translatedText") or body.get("text") or "").strip()
-            if isinstance(body, dict)
-            else ""
-        )
-        if translated:
-            return {"__combined__": translated}
-        raise RuntimeError("Remote translator returned no usable translation")
+            try:
+                body = json.loads(response.read().decode("utf-8"))
+            except (ValueError, UnicodeError):
+                raise TranslationAlignmentError() from None
+        if not isinstance(body, dict):
+            raise TranslationAlignmentError()
+        return _translation_text(body.get("translated_text") or body.get("translatedText") or body.get("text"))
 
     async def translate_blocks(self, blocks: list[TextBlock], source_language: str, target_language: str) -> dict[str, str]:
         return await asyncio.to_thread(self._translate_sync, blocks, source_language, target_language)

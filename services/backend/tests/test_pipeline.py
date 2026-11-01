@@ -4,6 +4,7 @@ import unittest
 
 from overlay_backend.domain import ClientSession, NormalizedBounds, TextBlock
 from overlay_backend.pipeline import FramePipeline, LayoutAnalyzer
+from overlay_backend.translation.providers import TranslationAlignmentError
 
 from .helpers import StubTranslationProvider
 
@@ -35,6 +36,53 @@ class LayoutTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_each_block_keeps_its_translation_and_combined_reading_order(self) -> None:
+        class ReorderedTranslator(StubTranslationProvider):
+            async def translate_blocks(self, blocks, source_language, target_language):
+                return {item.id: f"translated:{item.text}" for item in reversed(blocks)}
+
+        pipeline = FramePipeline(_UnusedOcr(), ReorderedTranslator())
+        session = ClientSession("one", "desktop", source_language="en")
+        result = await pipeline.process_text(session, session.region("screen"), "screen", "1", [
+            block("bottom", "Two", 0.1, 0.5), block("top", "One", 0.1, 0.1),
+        ], "device-ocr")
+        self.assertEqual([(b.source.id, b.translated_text) for b in result.blocks], [
+            ("top", "translated:One"), ("bottom", "translated:Two"),
+        ])
+        self.assertEqual(result.combined_translated_text, "translated:One\ntranslated:Two")
+
+    async def test_bad_alignment_does_not_replace_success_or_poison_cache_and_can_retry(self) -> None:
+        class Translator(StubTranslationProvider):
+            bad = False
+            async def translate_blocks(self, blocks, source_language, target_language):
+                if self.bad:
+                    return {"__combined__": "must never display"}
+                return await super().translate_blocks(blocks, source_language, target_language)
+
+        translator = Translator()
+        pipeline = FramePipeline(_UnusedOcr(), translator)
+        session = ClientSession("one", "desktop")
+        region = session.region("screen")
+        first = await pipeline.process_text(session, region, "screen", "1", [block("a", "One", 0.1, 0.1)], "device-ocr")
+        translator.bad = True
+        changed = [block("a", "Two", 0.1, 0.1)]
+        with self.assertRaises(TranslationAlignmentError):
+            await pipeline.process_text(session, region, "screen", "2", changed, "device-ocr")
+        self.assertEqual(region.last_dedupe_key, first.dedupe_key)
+        self.assertEqual(len(pipeline.cache._values), 1)
+        translator.bad = False
+        retry = await pipeline.process_text(session, region, "screen", "3", changed, "device-ocr")
+        self.assertEqual(retry.blocks[0].translated_text, "[zh-Hant] Two")
+
+    async def test_cache_does_not_reuse_translations_for_different_block_ids(self) -> None:
+        pipeline = FramePipeline(_UnusedOcr(), StubTranslationProvider())
+        session = ClientSession("one", "desktop")
+        region = session.region("screen")
+        await pipeline.process_text(session, region, "screen", "1", [block("a", "Same", 0.1, 0.1)], "device-ocr")
+        result = await pipeline.process_text(session, region, "screen", "2", [block("b", "Same", 0.1, 0.1)], "device-ocr")
+        self.assertEqual(result.blocks[0].source.id, "b")
+        self.assertEqual(result.blocks[0].translated_text, "[zh-Hant] Same")
+
     async def test_translation_deduplicates_within_one_region(self) -> None:
         pipeline = FramePipeline(_UnusedOcr(), StubTranslationProvider())  # type: ignore[arg-type]
         session = ClientSession("one", "ios")
