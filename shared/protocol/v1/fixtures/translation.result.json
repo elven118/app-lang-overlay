@@ -1,0 +1,34 @@
+{
+  "type": "translation.result",
+  "sessionId": "ios-a1",
+  "regionId": "screen",
+  "frameId": "42",
+  "ocrProvider": "vision-ocr",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "今日は",
+      "translatedText": "今天",
+      "sourceReadingSegments": [
+        { "text": "今日", "reading": "きょう" },
+        { "text": "は", "reading": null }
+      ],
+      "confidence": 0.94,
+      "bounds": {
+        "x": 0.1,
+        "y": 0.2,
+        "width": 0.3,
+        "height": 0.08
+      },
+      "readingOrder": 0
+    }
+  ],
+  "combinedSourceText": "今日は",
+  "combinedTranslatedText": "今天",
+  "dedupeKey": "7ca1f7c2d420",
+  "timingMs": {
+    "ocr": 0,
+    "translation": 84.2,
+    "total": 85.1
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "type": "session.start",
+  "requestId": "request-start-1",
+  "sessionId": "desktop-a1",
+  "sourceLanguage": "ja",
+  "targetLanguage": "zh-Hant",
+  "imageUploadConsent": true
+}

@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://app-lang-overlay.local/protocol/v1/messages.schema.json",
+  "title": "App Language Overlay Protocol V1",
+  "oneOf": [
+    { "$ref": "#/$defs/clientHello" },
+    { "$ref": "#/$defs/sessionStart" },
+    { "$ref": "#/$defs/sessionUpdate" },
+    { "$ref": "#/$defs/sessionCommand" },
+    { "$ref": "#/$defs/regionRemove" },
+    { "$ref": "#/$defs/frameText" },
+    { "$ref": "#/$defs/frameImage" },
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/serverReady" },
+    { "$ref": "#/$defs/sessionState" },
+    { "$ref": "#/$defs/translationResult" },
+    { "$ref": "#/$defs/translationClear" },
+    { "$ref": "#/$defs/errorMessage" },
+    { "$ref": "#/$defs/pong" }
+  ],
+  "$defs": {
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "regionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "frameId": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "sourceLanguage": {
+      "enum": ["auto", "en", "ja", "ko", "zh-Hans", "zh-Hant"]
+    },
+    "targetLanguage": {
+      "enum": ["en", "zh-Hant", "ja"]
+    },
+    "ocrProvider": {
+      "enum": [
+        "tesseract",
+        "google-mlkit",
+        "device-ocr",
+        "vision-ocr",
+        "replaykit",
+        "server-onnx"
+      ]
+    },
+    "sourceReadingSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "reading"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 16000 },
+        "reading": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 16000 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "normalizedBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "textBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "confidence", "bounds", "readingOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 16000 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bounds": { "$ref": "#/$defs/normalizedBounds" },
+        "readingOrder": { "type": "integer", "minimum": 0, "maximum": 99 }
+      }
+    },
+    "translationBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "translatedText", "sourceReadingSegments", "confidence", "bounds", "readingOrder"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 16000 },
+        "translatedText": { "type": "string", "maxLength": 16000 },
+        "sourceReadingSegments": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1000,
+              "items": { "$ref": "#/$defs/sourceReadingSegment" }
+            },
+            { "type": "null" }
+          ]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bounds": { "$ref": "#/$defs/normalizedBounds" },
+        "readingOrder": { "type": "integer", "minimum": 0, "maximum": 99 }
+      }
+    },
+    "clientHello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "protocolVersion", "clientKind", "appVersion", "ocrProviders"],
+      "properties": {
+        "type": { "const": "client.hello" },
+        "protocolVersion": { "const": 1 },
+        "clientKind": { "enum": ["desktop", "ios", "android"] },
+        "appVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "ocrProviders": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/ocrProvider" }
+        }
+      }
+    },
+    "sessionStart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "sessionId", "sourceLanguage", "targetLanguage", "imageUploadConsent"],
+      "properties": {
+        "type": { "const": "session.start" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "sourceLanguage": { "$ref": "#/$defs/sourceLanguage" },
+        "targetLanguage": { "$ref": "#/$defs/targetLanguage" },
+        "imageUploadConsent": { "type": "boolean" }
+      }
+    },
+    "sessionUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "sessionId", "settings"],
+      "properties": {
+        "type": { "const": "session.update" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "sourceLanguage": { "$ref": "#/$defs/sourceLanguage" },
+            "targetLanguage": { "$ref": "#/$defs/targetLanguage" },
+            "imageUploadConsent": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "sessionCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "sessionId"],
+      "properties": {
+        "type": { "enum": ["session.pause", "session.resume", "session.end"] },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" }
+      }
+    },
+    "regionRemove": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "sessionId", "regionId"],
+      "properties": {
+        "type": { "const": "region.remove" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" }
+      }
+    },
+    "frameText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sessionId", "regionId", "frameId", "capturedAtMs", "frameWidth", "frameHeight", "blocks"],
+      "properties": {
+        "type": { "const": "frame.text" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" },
+        "frameId": { "$ref": "#/$defs/frameId" },
+        "capturedAtMs": { "type": "integer", "minimum": 0 },
+        "frameWidth": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "frameHeight": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "blocks": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/textBlock" }
+        }
+      }
+    },
+    "frameImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sessionId", "regionId", "frameId", "capturedAtMs", "frameWidth", "frameHeight", "mimeType", "clientOcrDiagnostics"],
+      "properties": {
+        "type": { "const": "frame.image" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" },
+        "frameId": { "$ref": "#/$defs/frameId" },
+        "capturedAtMs": { "type": "integer", "minimum": 0 },
+        "frameWidth": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "frameHeight": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "mimeType": { "const": "image/jpeg" },
+        "clientOcrDiagnostics": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": { "type": "string", "maxLength": 256 }
+        }
+      }
+    },
+    "ping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId"],
+      "properties": {
+        "type": { "const": "ping" },
+        "requestId": { "$ref": "#/$defs/requestId" }
+      }
+    },
+    "serverReady": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "protocolVersion", "ocrProviders"],
+      "properties": {
+        "type": { "const": "server.ready" },
+        "protocolVersion": { "const": 1 },
+        "ocrProviders": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/ocrProvider" }
+        }
+      }
+    },
+    "sessionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "sessionId", "sourceLanguage", "targetLanguage", "imageUploadConsent", "paused"],
+      "properties": {
+        "type": { "const": "session.state" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "sourceLanguage": { "$ref": "#/$defs/sourceLanguage" },
+        "targetLanguage": { "$ref": "#/$defs/targetLanguage" },
+        "imageUploadConsent": { "type": "boolean" },
+        "paused": { "type": "boolean" }
+      }
+    },
+    "translationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sessionId", "regionId", "frameId", "ocrProvider", "blocks", "combinedSourceText", "combinedTranslatedText", "dedupeKey", "timingMs"],
+      "properties": {
+        "type": { "const": "translation.result" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" },
+        "frameId": { "$ref": "#/$defs/frameId" },
+        "ocrProvider": { "$ref": "#/$defs/ocrProvider" },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/translationBlock" }
+        },
+        "combinedSourceText": { "type": "string", "minLength": 1, "maxLength": 16000 },
+        "combinedTranslatedText": { "type": "string", "maxLength": 16000 },
+        "dedupeKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "timingMs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ocr", "translation", "total"],
+          "properties": {
+            "ocr": { "type": "number", "minimum": 0 },
+            "translation": { "type": "number", "minimum": 0 },
+            "total": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "translationClear": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sessionId", "regionId", "frameId", "reason"],
+      "properties": {
+        "type": { "const": "translation.clear" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" },
+        "frameId": { "$ref": "#/$defs/frameId" },
+        "reason": { "enum": ["stable-empty", "region-removed", "session-ended"] }
+      }
+    },
+    "errorMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "code", "message", "retryable"],
+      "properties": {
+        "type": { "const": "error" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "retryable": { "type": "boolean" },
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "sessionId": { "$ref": "#/$defs/sessionId" },
+        "regionId": { "$ref": "#/$defs/regionId" },
+        "frameId": { "$ref": "#/$defs/frameId" }
+      }
+    },
+    "pong": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "requestId"],
+      "properties": {
+        "type": { "const": "pong" },
+        "requestId": { "$ref": "#/$defs/requestId" }
+      }
+    }
+  }
+}

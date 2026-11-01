@@ -1,0 +1,7 @@
+{
+  "type": "client.hello",
+  "protocolVersion": 1,
+  "clientKind": "ios",
+  "appVersion": "0.3.0",
+  "ocrProviders": ["vision-ocr", "replaykit", "device-ocr", "server-onnx"]
+}

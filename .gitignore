@@ -32,6 +32,9 @@ yarn-error.log*
 data/captures/
 data/profiles/
 
+# Local environment configuration
+.env
+
 # OS / Editor
 .DS_Store
 .idea/

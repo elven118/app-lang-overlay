@@ -1,0 +1,13 @@
+{
+  "type": "frame.image",
+  "sessionId": "desktop-a1",
+  "regionId": "dialogue-1",
+  "frameId": "47",
+  "capturedAtMs": 1787623201500,
+  "frameWidth": 1280,
+  "frameHeight": 240,
+  "mimeType": "image/jpeg",
+  "clientOcrDiagnostics": {},
+  "crop": { "x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8 },
+  "orientation": 90
+}

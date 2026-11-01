@@ -1,0 +1,9 @@
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; cursor: crosshair; user-select: none; }
+body { background: rgba(0, 0, 0, 0.06); font: 14px -apple-system, BlinkMacSystemFont, sans-serif; }
+#highlight { position: absolute; box-sizing: border-box; border: 4px solid #54beff;
+  background: rgba(84, 190, 255, 0.12); pointer-events: none; }
+#instructions { position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+  max-width: calc(100vw - 60px); padding: 12px 20px; border-radius: 10px;
+  background: #162333; color: white; box-shadow: 0 3px 16px #0006; pointer-events: none; text-align: center; }
+#title { display: block; margin-bottom: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#title:empty { display: none; }

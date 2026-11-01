@@ -1,0 +1,71 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  user-select: none;
+}
+
+body:hover {
+  background: rgba(52, 152, 219, 0.2);
+}
+
+body.drag-mode {
+  cursor: crosshair;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+html, body { overflow: hidden; }
+#toolbar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 60; display: flex; gap: 8px; align-items: center; padding: 12px;
+  border-radius: 10px; background: rgba(12, 20, 30, .95); color: white;
+  font: 13px "Avenir Next", "Segoe UI", sans-serif; cursor: default; }
+#toolbar[hidden] { display: none; }
+#toolbar { max-width: calc(100vw - 48px); flex-wrap: wrap; justify-content: center; }
+#toolbar button, .saved-region button { border: 1px solid #ffffff50; border-radius: 6px;
+  background: #22344a; color: white; padding: 7px 10px; cursor: pointer; white-space: nowrap; }
+#toolbar button:disabled { opacity: .45; cursor: default; }
+.saved-region { position: fixed; box-sizing: border-box; border: 2px solid #4da3ff;
+  background: rgba(77, 163, 255, .15); pointer-events: none; z-index: 20; }
+.saved-region span { display: inline-block; padding: 3px 7px; background: #164d82;
+  color: white; font: 13px "Avenir Next", "Segoe UI", sans-serif; }
+.saved-region button { position: absolute; right: 0; top: 0; padding: 2px 7px; pointer-events: auto; }
+
+#hint {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 13px;
+  z-index: 30;
+}
+
+#selection {
+  position: fixed;
+  display: none;
+  border: 2px solid #4da3ff;
+  background: rgba(77, 163, 255, 0.25);
+  pointer-events: none;
+  z-index: 40;
+}
+
+#coords {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 6px 8px;
+  border-radius: 6px;
+  z-index: 50;
+}

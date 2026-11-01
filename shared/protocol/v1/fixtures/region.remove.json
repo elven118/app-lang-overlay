@@ -1,0 +1,6 @@
+{
+  "type": "region.remove",
+  "requestId": "request-remove-1",
+  "sessionId": "desktop-a1",
+  "regionId": "dialogue-1"
+}

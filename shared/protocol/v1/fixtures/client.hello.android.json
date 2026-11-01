@@ -1,0 +1,7 @@
+{
+  "type": "client.hello",
+  "protocolVersion": 1,
+  "clientKind": "android",
+  "appVersion": "0.3.0",
+  "ocrProviders": ["tesseract", "google-mlkit", "device-ocr", "server-onnx"]
+}

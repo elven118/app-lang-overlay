@@ -1,0 +1,31 @@
+{
+  "type": "translation.result",
+  "sessionId": "desktop-a1",
+  "regionId": "article-1",
+  "frameId": "48",
+  "ocrProvider": "server-onnx",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Good morning.",
+      "translatedText": "早安。",
+      "sourceReadingSegments": null,
+      "confidence": 0.98,
+      "bounds": {
+        "x": 0.1,
+        "y": 0.15,
+        "width": 0.4,
+        "height": 0.1
+      },
+      "readingOrder": 0
+    }
+  ],
+  "combinedSourceText": "Good morning.",
+  "combinedTranslatedText": "早安。",
+  "dedupeKey": "8319a7e3d152",
+  "timingMs": {
+    "ocr": 38.5,
+    "translation": 75.4,
+    "total": 114.6
+  }
+}

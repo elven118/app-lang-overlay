@@ -1,0 +1,7 @@
+{
+  "type": "client.hello",
+  "protocolVersion": 1,
+  "clientKind": "desktop",
+  "appVersion": "0.3.0",
+  "ocrProviders": ["server-onnx"]
+}
