@@ -41,7 +41,7 @@
       "enum": ["auto", "en", "ja", "ko", "zh-Hans", "zh-Hant"]
     },
     "targetLanguage": {
-      "enum": ["en", "zh-Hant", "ja"]
+      "enum": ["en", "zh-Hant", "ja", "ko", "zh-Hans"]
     },
     "ocrProvider": {
       "enum": [

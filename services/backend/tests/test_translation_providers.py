@@ -11,9 +11,12 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from overlay_backend.domain import NormalizedBounds, TextBlock
-from overlay_backend.translation.providers import (
-    LocalLlamaProvider, RemoteHttpProvider, TranslationAlignmentError, _prompt,
-)
+from overlay_backend.config import BackendSettings
+from overlay_backend.translation.common import TranslationAlignmentError, _prompt
+from overlay_backend.translation.groq_provider import GroqProvider
+from overlay_backend.translation.local_llama_provider import LocalLlamaProvider
+from overlay_backend.translation.provider_selector import build_translation_provider
+from overlay_backend.translation.remote_http_provider import RemoteHttpProvider
 
 
 def block(identifier: str, text: str) -> TextBlock:
@@ -67,7 +70,7 @@ class TranslationProviderTests(unittest.TestCase):
             response = MagicMock()
             response.__enter__.return_value.read.return_value = json.dumps({"translated_text": text}).encode()
             responses.append(response)
-        with patch('overlay_backend.translation.providers.request.urlopen', side_effect=responses) as http:
+        with patch('overlay_backend.translation.remote_http_provider.request.urlopen', side_effect=responses) as http:
             translations = RemoteHttpProvider('https://translator.test', 'secret')._translate_sync(
                 [block("a", "One"), block("b", "Two")], "en", "zh-Hant",
             )
@@ -82,7 +85,7 @@ class TranslationProviderTests(unittest.TestCase):
 
     def test_remote_provider_rejects_empty_non_string_and_block_array_responses(self) -> None:
         for body in [{"translated_text": " "}, {"translated_text": 42}, {"blocks": []}, []]:
-            with self.subTest(body=body), patch('overlay_backend.translation.providers.request.urlopen') as http:
+            with self.subTest(body=body), patch('overlay_backend.translation.remote_http_provider.request.urlopen') as http:
                 http.return_value.__enter__.return_value.read.return_value = json.dumps(body).encode()
                 with self.assertRaises(TranslationAlignmentError):
                     RemoteHttpProvider('https://translator.test')._translate_sync([block("a", "One")], "en", "ja")
@@ -92,9 +95,78 @@ class TranslationProviderTests(unittest.TestCase):
         provider._llm = MagicMock()
         self.assertEqual(provider._translate_sync([], "en", "zh-Hant"), {})
         provider._llm.assert_not_called()
-        with patch('overlay_backend.translation.providers.request.urlopen') as http:
+        with patch('overlay_backend.translation.remote_http_provider.request.urlopen') as http:
             self.assertEqual(RemoteHttpProvider('https://translator.test')._translate_sync([], "en", "ja"), {})
             http.assert_not_called()
+
+
+class GroqProviderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.groq = MagicMock()
+        self.module_patch = patch.dict("sys.modules", {"groq": SimpleNamespace(Groq=self.groq)})
+        self.module_patch.start()
+        self.addCleanup(self.module_patch.stop)
+        self.create = self.groq.return_value.chat.completions.create
+
+    def completion(self, content: object, finish_reason: str = "stop") -> SimpleNamespace:
+        return SimpleNamespace(choices=[SimpleNamespace(
+            finish_reason=finish_reason, message=SimpleNamespace(content=content),
+        )])
+
+    def test_groq_uses_configured_model_and_maps_each_block(self) -> None:
+        with patch.dict("os.environ", {
+            "OVERLAY_LLM_MODE": "groq", "GROQ_API_KEY": "test-key",
+            "OVERLAY_LLM_GROQ_MODEL": "custom-model", "OVERLAY_LLM_MAX_TOKENS": "256",
+        }, clear=True):
+            provider = build_translation_provider(BackendSettings.from_env())
+            self.create.side_effect = [self.completion(" First translation "), self.completion("Second translation")]
+            result = asyncio.run(provider.translate_blocks([block("a", "One"), block("b", "Two")], "en", "zh-Hant"))
+        self.assertIsInstance(provider, GroqProvider)
+        self.assertEqual(result, {"a": "First translation", "b": "Second translation"})
+        self.groq.assert_called_once_with(api_key="test-key", timeout=20.0, max_retries=0)
+        self.assertEqual(self.create.call_count, 2)
+        for call, text in zip(self.create.call_args_list, ["One", "Two"]):
+            self.assertEqual(call.kwargs["model"], "custom-model")
+            self.assertEqual(call.kwargs["max_completion_tokens"], 256)
+            self.assertEqual(call.kwargs["messages"], [{"role": "user", "content": _prompt(text, "en", "zh-Hant")}])
+        self.assertIn("custom-model", provider.revision)
+        self.assertNotIn("test-key", provider.revision)
+
+    def test_groq_rejects_invalid_or_incomplete_responses(self) -> None:
+        responses = [
+            self.completion(" "), self.completion(None), self.completion(42),
+            self.completion("partial", "length"), self.completion("blocked", "content_filter"),
+            SimpleNamespace(choices=[]), SimpleNamespace(choices=[None]), None,
+        ]
+        provider = GroqProvider("test-key")
+        for response in responses:
+            with self.subTest(response=response):
+                self.create.side_effect = [self.completion("First succeeds"), response]
+                with self.assertRaises(TranslationAlignmentError):
+                    provider._translate_sync([block("a", "One"), block("b", "Two")], "en", "ja")
+
+    def test_groq_empty_blocks_do_not_request_completion(self) -> None:
+        self.assertEqual(GroqProvider("test-key")._translate_sync([], "en", "ja"), {})
+        self.create.assert_not_called()
+
+    def test_groq_api_errors_propagate(self) -> None:
+        self.create.side_effect = RuntimeError("API unavailable")
+        with self.assertRaisesRegex(RuntimeError, "API unavailable"):
+            GroqProvider("test-key")._translate_sync([block("a", "One")], "en", "ja")
+
+    def test_groq_settings_require_key_only_in_groq_mode(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(BackendSettings.from_env().translator_mode, "local")
+            with self.assertRaisesRegex(ValueError, "GROQ_API_KEY"):
+                BackendSettings.from_env(translator_mode="groq")
+            settings = BackendSettings.from_env(translator_mode="groq", groq_api_key="test-key")
+            self.assertEqual(settings.groq_model, "llama-3.3-70b-versatile")
+            with self.assertRaisesRegex(ValueError, "OVERLAY_LLM_GROQ_MODEL"):
+                BackendSettings.from_env(translator_mode="groq", groq_api_key="test-key", groq_model=" ")
+            self.assertIsInstance(build_translation_provider(BackendSettings()), LocalLlamaProvider)
+            self.assertIsInstance(build_translation_provider(BackendSettings(
+                translator_mode="remote", remote_translation_url="https://translator.test",
+            )), RemoteHttpProvider)
 
 
 class _RecordingLlama:
@@ -178,7 +250,7 @@ class TranslationCacheAndConcurrencyTests(unittest.TestCase):
             def read(self):
                 return json.dumps({"translated_text": f"translated:{self.payload['text']}"}).encode()
 
-        with patch("overlay_backend.translation.providers.request.urlopen", side_effect=lambda req, timeout: Response(req)):
+        with patch("overlay_backend.translation.remote_http_provider.request.urlopen", side_effect=lambda req, timeout: Response(req)):
             result = RemoteHttpProvider("https://example.test/translate")._translate_sync(
                 [block("a", "First"), block("b", "Second")], "en", "zh-Hant",
             )

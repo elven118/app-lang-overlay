@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 
 SOURCE_LANGUAGES = {"auto", "en", "ja", "ko", "zh-Hans", "zh-Hant"}
-TARGET_LANGUAGES = {"en", "zh-Hant", "ja"}
+TARGET_LANGUAGES = {"en", "zh-Hant", "ja", "ko", "zh-Hans"}
 CLIENT_KINDS = {"desktop", "ios", "android"}
 OCR_PROVIDERS = {
     "tesseract",

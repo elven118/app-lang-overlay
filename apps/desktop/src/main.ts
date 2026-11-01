@@ -115,7 +115,7 @@ function normalizeSourceLanguage(value: unknown): SourceLanguage {
 }
 
 function normalizeTargetLanguage(value: unknown): TargetLanguage {
-  return ["en", "zh-Hant", "ja"].includes(String(value || ""))
+  return ["en", "zh-Hant", "ja", "ko", "zh-Hans"].includes(String(value || ""))
     ? value as TargetLanguage
     : DEFAULT_SETTINGS.targetLanguage;
 }
@@ -223,6 +223,7 @@ let transcriptWindow: BrowserWindow | null = null;
 let selectionWindows: SelectionWindow[] = [];
 let areaPickerSettings: OverlaySettings | null = null;
 let windowPicker: HoverWindowPicker | null = null;
+let captureSelectionComplete: ((confirmed: boolean) => void) | null = null;
 // OS window IDs are temporary. Always ask again after restart/profile switch.
 let selectedWindowSource: WindowChoice | null = null;
 let appMenu: Menu | null = null;
@@ -493,6 +494,18 @@ function sendToDesktopRenderers(channel: string, payload: unknown): void {
   }
 }
 
+function restoreOverlayVisibility(): void {
+  // Pickers and target apps can change native z-order without changing the
+  // renderer's CSS visibility. Restore the overlay without stealing focus.
+  if (selectionWindows.length > 0 || windowPicker) return;
+  for (const win of [overlayWindow, ...secondaryOverlays]) {
+    if (!win || win.isDestroyed()) continue;
+    if (!win.isVisible()) win.showInactive();
+    win.moveTop();
+    win.setAlwaysOnTop(true, 'screen-saver');
+  }
+}
+
 function publishTranslation(result: DesktopTranslationResult): void {
   result = { ...result, captureBounds: captureBounds.get(result.regionId) ?? result.captureBounds };
   latestTranslations.set(result.regionId, result);
@@ -502,6 +515,7 @@ function publishTranslation(result: DesktopTranslationResult): void {
     if (transcriptHistory.length > 500) transcriptHistory.shift();
   }
   sendToDesktopRenderers("translation:result", result);
+  restoreOverlayVisibility();
 }
 
 function publishCaptureBounds(regionId: string, bounds: DesktopRect): void {
@@ -576,6 +590,8 @@ function createOverlayWindow(display?: Display): BrowserWindow {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // The overlay must keep painting when the picker/target owns focus.
+      backgroundThrottling: false,
       preload: path.join(__dirname, "preload/index.js"),
     },
   });
@@ -718,6 +734,7 @@ function refreshOverlayWindowForProfile(): void {
     width: bounds.width,
     height: bounds.height,
   });
+  overlayWindow.webContents.once('did-finish-load', restoreOverlayVisibility);
   overlayWindow.webContents.reloadIgnoringCache();
   refreshSecondaryOverlays();
 }
@@ -749,9 +766,10 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
       const source = (await listCaptureWindows()).find((choice) => choice.id.split(':')[1] === String(windowId));
       if (!source) throw new Error('That window is no longer available. Hover over another window.');
       if (windowPicker !== picker) return;
+      saveOverlaySettings(profileId, captureSettings);
       selectedWindowSource = source;
       captureBounds.clear();
-      saveOverlaySettings(profileId, captureSettings);
+      completeCaptureSelection(true);
       closeRegionPickerWindows();
       latestTranslations.clear();
       desktopCapture.stop();
@@ -761,6 +779,11 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
     });
     windowPicker = picker;
     picker.onCancel = () => { if (windowPicker === picker) closeRegionPickerWindows(); };
+    picker.onError = (error) => {
+      if (windowPicker !== picker) return;
+      console.error('[window-picker]', error);
+      closeRegionPickerWindows();
+    };
     try { await picker.start(); }
     catch (error) {
       picker.dispose();
@@ -768,14 +791,17 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
       const message = error instanceof Error ? error.message : String(error);
       console.error('[window-picker]', message);
       publishStreamStatus({ state: 'error', message: `Window selection failed: ${message}` });
+      closeRegionPickerWindows();
     }
     return;
   }
 
   areaPickerSettings = captureSettings;
   const displays = screen.getAllDisplays();
+  if (!displays.length) throw new Error('No displays are available for capture selection');
 
-  selectionWindows = displays.map((display, index) => {
+  selectionWindows = [];
+  displays.forEach((display, index) => {
     const win = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -795,11 +821,16 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
         preload: path.join(__dirname, "preload/index.js"),
       },
     }) as SelectionWindow;
+    selectionWindows.push(win);
 
     win.display = display;
     win.displayIndex = index;
 
-    win.loadFile(path.join(__dirname, "renderer/picker/index.html"));
+    void win.loadFile(path.join(__dirname, "renderer/picker/index.html")).catch((error) => {
+      if (!selectionWindows.includes(win)) return;
+      console.error('[area-picker]', error);
+      closeRegionPickerWindows();
+    });
 
     if (displays.length === 1) {
       win.webContents.once("did-finish-load", () => {
@@ -814,10 +845,11 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
     });
 
     win.on("closed", () => {
+      const wasActive = selectionWindows.includes(win);
       selectionWindows = selectionWindows.filter((w) => w !== win);
+      if (wasActive && selectionWindows.length === 0) closeRegionPickerWindows();
     });
 
-    return win;
   });
 }
 
@@ -835,6 +867,12 @@ function pickerStartPayload(win: SelectionWindow): PickerStart {
     multiple, regions: local, otherRegionCount: regions.length - local.length };
 }
 
+function completeCaptureSelection(confirmed: boolean): void {
+  const complete = captureSelectionComplete;
+  captureSelectionComplete = null;
+  complete?.(confirmed);
+}
+
 function closeRegionPickerWindows(): void {
   setOverlayInteraction(false);
   sendToDesktopRenderers('overlay:selection-preview', false);
@@ -842,12 +880,14 @@ function closeRegionPickerWindows(): void {
   areaPickerSettings = null;
   windowPicker?.dispose();
   windowPicker = null;
-  selectionWindows.forEach((win) => {
+  const windows = selectionWindows;
+  selectionWindows = [];
+  windows.forEach((win) => {
     if (!win.isDestroyed()) {
       win.close();
     }
   });
-  selectionWindows = [];
+  completeCaptureSelection(false);
 }
 
 ipcMain.handle("overlay:get-settings", () => getOverlaySettings(profileId));
@@ -867,8 +907,16 @@ ipcMain.handle("overlay:save-settings", (_event, payload: OverlaySettings) => {
   const previous = getOverlaySettings(profileId);
   if (payload.mode !== previous.mode) {
     // Every mode change chooses its capture target before committing settings.
-    void openRegionPickerWindows(payload);
-    return previous;
+    return new Promise<OverlaySettings>((resolve) => {
+      // Opening first cancels any older pending selection. The returned promise
+      // represents confirmation/cancellation, not just creation of picker UI.
+      const starting = openRegionPickerWindows(payload);
+      captureSelectionComplete = (confirmed) => resolve(confirmed ? getOverlaySettings(profileId) : previous);
+      void starting.catch((error) => {
+        console.error('[capture-selection]', error);
+        closeRegionPickerWindows();
+      });
+    });
   }
   const saved = saveOverlaySettings(profileId, payload);
   if (previous.mode !== saved.mode) { captureBounds.clear(); latestTranslations.clear(); }
@@ -978,10 +1026,17 @@ ipcMain.handle("picker:submit", (event, value: unknown) => {
   if (!region) return { status: 'invalid' };
 
   // One profile write commits the entire edited set. Cancel never writes drafts.
-  saveCaptureRegion(profileId, region, unique.length ? pickerBounds : undefined, multiple ? allRegions : undefined, selectionSettings);
+  try {
+    saveCaptureRegion(profileId, region, unique.length ? pickerBounds : undefined, multiple ? allRegions : undefined, selectionSettings);
+  } catch (error) {
+    console.error('[area-picker]', error);
+    closeRegionPickerWindows();
+    return { status: 'error' };
+  }
+  completeCaptureSelection(true);
   latestTranslations.clear();
   captureBounds.clear();
-  desktopCapture.reset();
+  desktopCapture.stop();
   desktopStream?.refreshCapture();
   refreshOverlayWindowForProfile();
   closeRegionPickerWindows();

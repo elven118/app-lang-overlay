@@ -30,6 +30,8 @@ class BackendSettings:
     max_header_bytes: int = 64 * 1024
     max_blocks: int = 100
     max_source_chars: int = 16_000
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
 
     @classmethod
     def from_env(cls, **overrides: object) -> "BackendSettings":
@@ -42,6 +44,8 @@ class BackendSettings:
             "remote_translation_url": os.getenv("OVERLAY_LLM_REMOTE_URL", ""),
             "remote_translation_token": os.getenv("OVERLAY_LLM_REMOTE_API_KEY", ""),
             "model_path": os.getenv("OVERLAY_LLM_MODEL_PATH", ""),
+            "groq_api_key": os.getenv("GROQ_API_KEY", "").strip(),
+            "groq_model": (os.getenv("OVERLAY_LLM_GROQ_MODEL") or "llama-3.3-70b-versatile").strip(),
         }
         values.update({key: value for key, value in overrides.items() if value is not None})
         settings = cls(**values)
@@ -56,7 +60,12 @@ class BackendSettings:
             raise ValueError("OVERLAY_BACKEND_API_TOKEN is required when binding beyond loopback")
         if not loopback and not self.allow_insecure_lan:
             raise ValueError("OVERLAY_ALLOW_INSECURE_LAN=1 is required for a non-loopback ws:// listener")
-        if self.translator_mode not in {"local", "remote"}:
-            raise ValueError("OVERLAY_LLM_MODE must be local or remote")
+        if self.translator_mode not in {"local", "remote", "groq"}:
+            raise ValueError("OVERLAY_LLM_MODE must be local, remote or groq")
         if self.translator_mode == "remote" and not self.remote_translation_url:
             raise ValueError("remote translation URL is required in remote mode")
+        if self.translator_mode == "groq":
+            if not self.groq_api_key.strip():
+                raise ValueError("GROQ_API_KEY is required in groq mode")
+            if not self.groq_model.strip():
+                raise ValueError("OVERLAY_LLM_GROQ_MODEL must not be empty in groq mode")

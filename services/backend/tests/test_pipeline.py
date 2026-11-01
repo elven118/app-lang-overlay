@@ -4,7 +4,7 @@ import unittest
 
 from overlay_backend.domain import ClientSession, NormalizedBounds, TextBlock
 from overlay_backend.pipeline import FramePipeline, LayoutAnalyzer
-from overlay_backend.translation.providers import TranslationAlignmentError
+from overlay_backend.translation.common import TranslationAlignmentError
 
 from .helpers import StubTranslationProvider
 

@@ -64,6 +64,7 @@ test('cancelling selection closes settings and restores mouse passthrough withou
     overlayWindow: { isDestroyed: () => false, webContents: { send: (event) => messages.push(event) } },
     setOverlayInteraction: (enabled) => interaction.push(enabled), sendToDesktopRenderers: (event) => messages.push(event),
     saveProfile() { assert.fail('Cancel must not save settings'); },
+    completeCaptureSelection: (confirmed) => { assert.equal(confirmed, false); },
   };
   vm.runInNewContext(ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
   context.closeRegionPickerWindows();
@@ -93,6 +94,22 @@ test('Show Source keeps false through settings normalization and profile reload 
   const defaultShowSource = context.normalizeOverlaySettings({}, display).showSource;
   assert.equal(typeof defaultShowSource, 'boolean');
   assert.equal(context.normalizeOverlaySettings({ showSource: 'false' }, display).showSource, defaultShowSource);
+});
+
+test('Korean and Simplified Chinese settings survive normalization and profile reload', () => {
+  const ts = require('typescript');
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const settingsCode = source.slice(source.indexOf('const DEFAULT_SETTINGS'), source.indexOf('const profileStore'));
+  const context = { process: { env: {} } };
+  require('node:vm').runInNewContext(ts.transpileModule(settingsCode, {}).outputText, context);
+  const display = { width: 1920, height: 1080 };
+  for (const language of ['ko', 'zh-Hans']) {
+    const settings = context.normalizeOverlaySettings({ ocrLang: language, targetLanguage: language }, display);
+    const saved = JSON.parse(JSON.stringify(context.settingsForProfile(settings)));
+    const reloaded = context.normalizeOverlaySettings(saved, display);
+    assert.equal(reloaded.ocrLang, language);
+    assert.equal(reloaded.targetLanguage, language);
+  }
 });
 
 test('selection preview loops over all regions on the display and removes stale outlines', () => {
@@ -358,7 +375,8 @@ test('multi-region submit validates the sender and bounds, commits once, and pre
     loadProfile: () => ({ capture_regions: [remote, old] }), normalizeCaptureRegions: (regions) => regions || [],
     displayForCaptureRegion: (r) => ({ id: r.left < 0 ? 2 : 1 }),
     saveCaptureRegion: (...args) => writes.push(args),
-    latestTranslations: new Map(), captureBounds: new Map(), desktopCapture: { reset() { } },
+    completeCaptureSelection: (confirmed) => { assert.equal(confirmed, true); },
+    latestTranslations: new Map(), captureBounds: new Map(), desktopCapture: { stop() { } },
     desktopStream: { refreshCapture() { } }, refreshOverlayWindowForProfile() { }, closeRegionPickerWindows() { },
     publishProfileState() { },
     profileStore: { pathFor: () => '/profiles/test.json' },
@@ -375,7 +393,66 @@ test('multi-region submit validates the sender and bounds, commits once, and pre
   assert.equal(writes[0][4].mode, 'multiple_regions');
 });
 
-test('every capture mode change opens selection and leaves persisted mode unchanged until confirmed', () => {
+test('changing capture mode closes settings and releases interaction before requesting selection', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay/overlay.ts'), 'utf8');
+  const body = source.slice(source.indexOf('async function persistFromPanel('), source.indexOf('async function togglePanel('));
+  const ts = require('typescript');
+  for (const mode of ['selected_window', 'one_large_area', 'multiple_regions']) {
+    const calls = [];
+    const next = { mode };
+    let finishClosing;
+    const context = {
+      settings: { mode: mode === 'selected_window' ? 'one_large_area' : 'selected_window' },
+      parsePanelSettings: () => next,
+      togglePanel: (visible) => { calls.push(['panel', visible]); return new Promise(resolve => { finishClosing = resolve; }); },
+      hide: () => calls.push(['hide-hint']),
+      syncSettingVisibility() {},
+      persistSettings: async (settings) => { calls.push(['select', settings.mode]); context.settings = settings; },
+    };
+    require('node:vm').runInNewContext(ts.transpileModule(body, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+    }).outputText, context);
+    const pending = context.persistFromPanel();
+    assert.deepEqual(calls, [['panel', false]]);
+    finishClosing();
+    await pending;
+    assert.deepEqual(calls, [['panel', false], ['hide-hint'], ['select', mode]]);
+    calls.length = 0;
+    context.settings.mode = mode;
+    await context.persistFromPanel();
+    assert.deepEqual(calls, [['select', mode]]);
+  }
+});
+
+test('mode selection cancellation and failure reopen previous settings; confirmation keeps them closed', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay/overlay.ts'), 'utf8');
+  const body = source.slice(source.indexOf('async function persistFromPanel('), source.indexOf('async function togglePanel('));
+  const ts = require('typescript');
+  for (const outcome of ['confirmed', 'cancelled', 'failed']) {
+    const previous = { mode: 'one_large_area' };
+    const next = { mode: 'multiple_regions' };
+    const panels = [], errors = [];
+    const context = {
+      settings: previous, parsePanelSettings: () => next,
+      togglePanel: async visible => panels.push(visible), hide() {}, syncSettingVisibility() {},
+      persistSettings: async () => {
+        if (outcome === 'failed') throw new Error('Selection unavailable');
+        context.settings = outcome === 'confirmed' ? next : previous;
+      },
+      window: { overlayApi: { getSettings: async () => previous } },
+      setStyle() {}, syncPanelFromSettings() {}, console: { error: (...args) => errors.push(args) },
+    };
+    require('node:vm').runInNewContext(ts.transpileModule(body, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022 },
+    }).outputText, context);
+    await context.persistFromPanel();
+    assert.deepEqual(panels, outcome === 'confirmed' ? [false] : [false, true]);
+    assert.equal(context.settings.mode, outcome === 'confirmed' ? next.mode : previous.mode);
+    assert.equal(errors.length, outcome === 'failed' ? 1 : 0);
+  }
+});
+
+test('every capture mode change waits for confirmation or cancellation before returning settings', async () => {
   const ts = require('typescript');
   const vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
@@ -385,19 +462,46 @@ test('every capture mode change opens selection and leaves persisted mode unchan
       if (before === after) continue;
       let save, opened;
       const persisted = { mode: before };
-      vm.runInNewContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
+      const context = {
         profileId: 'test', ipcMain: { handle: (_name, fn) => { save = fn; } },
+        captureSelectionComplete: null,
         getOverlaySettings: () => persisted,
         openRegionPickerWindows: async (settings) => { opened = settings; },
         toggleOverlayPanel() { },
         saveOverlaySettings() { assert.fail('Mode must not persist before selection'); },
-      });
+      };
+      vm.runInNewContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
       const payload = { mode: after };
-      assert.equal(save({}, payload), persisted);
+      let settled = false;
+      const cancelled = save({}, payload).then(result => { settled = true; return result; });
       assert.equal(opened, payload);
       assert.equal(persisted.mode, before);
+      await Promise.resolve();
+      assert.equal(settled, false);
+      context.captureSelectionComplete(false);
+      assert.equal(await cancelled, persisted);
+      const confirmed = save({}, payload);
+      persisted.mode = after; // Native target confirmation saves the profile.
+      context.captureSelectionComplete(true);
+      assert.equal(await confirmed, persisted);
+      assert.equal(persisted.mode, after);
     }
   }
+});
+
+test('selection completion settles once so backend errors cannot roll back a confirmed mode', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const body = source.slice(source.indexOf('function completeCaptureSelection('), source.indexOf('function closeRegionPickerWindows('));
+  const outcomes = [];
+  const context = { captureSelectionComplete: confirmed => outcomes.push(confirmed) };
+  const ts = require('typescript');
+  require('node:vm').runInNewContext(ts.transpileModule(body, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText, context);
+  context.completeCaptureSelection(true);
+  context.completeCaptureSelection(false);
+  assert.deepEqual(outcomes, [true]);
+  assert.equal(context.captureSelectionComplete, null);
 });
 
 test('multiple-region images form one card while selected-window images retain individual blocks', () => {
@@ -598,7 +702,11 @@ test('Windows overlay protection is enabled before the window is shown', () => {
   const fn = source.slice(source.indexOf('function createOverlayWindow('), source.indexOf('function createControlWindow('));
   const calls = [];
   class Window {
-    constructor(options) { assert.equal(options.show, false); this.webContents = { on() { } }; }
+    constructor(options) {
+      assert.equal(options.show, false);
+      assert.equal(options.webPreferences.backgroundThrottling, false);
+      this.webContents = { on() { } };
+    }
     setContentProtection(value) { calls.push(['protect', value]); }
     show() { calls.push(['show']); }
     setVisibleOnAllWorkspaces() { }
@@ -613,6 +721,33 @@ test('Windows overlay protection is enabled before the window is shown', () => {
   vm.runInNewContext(ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
   context.createOverlayWindow();
   assert.deepEqual(calls, [['protect', true], ['show']]);
+});
+
+test('translation visibility restores native overlay z-order without focusing or covering the picker', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const body = source.slice(source.indexOf('function restoreOverlayVisibility('), source.indexOf('function publishTranslation('));
+  const calls = [];
+  const window = (label, visible) => ({ isDestroyed: () => false, isVisible: () => visible,
+    showInactive: () => calls.push([label, 'show-inactive']), moveTop: () => calls.push([label, 'move-top']),
+    setAlwaysOnTop: (value, level) => calls.push([label, 'always-on-top', value, level]),
+    focus() { assert.fail('Translation must not take keyboard focus'); } });
+  const context = { overlayWindow: window('primary', false), secondaryOverlays: [window('secondary', true)],
+    selectionWindows: [], windowPicker: null };
+  const ts = require('typescript');
+  require('node:vm').runInNewContext(ts.transpileModule(body, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText, context);
+  context.restoreOverlayVisibility();
+  assert.deepEqual(calls, [['primary', 'show-inactive'], ['primary', 'move-top'], ['primary', 'always-on-top', true, 'screen-saver'],
+    ['secondary', 'move-top'], ['secondary', 'always-on-top', true, 'screen-saver']]);
+  calls.length = 0;
+  context.selectionWindows = [{}];
+  context.restoreOverlayVisibility();
+  context.selectionWindows = [];
+  context.windowPicker = {};
+  context.restoreOverlayVisibility();
+  assert.deepEqual(calls, []);
+  assert.match(source.slice(source.indexOf('function publishTranslation('), source.indexOf('function publishCaptureBounds(')), /restoreOverlayVisibility\(\)/);
 });
 
 test('block placement prefers below, flips above, and clamps to the display work area', () => {
@@ -958,6 +1093,87 @@ test('window picker startup failures dispose resources and report an error witho
   assert.equal(context.windowPicker, null);
   assert.equal(statuses[0].state, 'error');
   assert.match(statuses[0].message, /Native helper unavailable/);
+});
+
+test('a new capture session uploads while an old mode sample is pending and ignores its late completion', async () => {
+  const { EventEmitter } = require('node:events');
+  const sockets = [];
+  class Socket extends EventEmitter {
+    static OPEN = 1;
+    readyState = 1;
+    sent = [];
+    constructor() { super(); sockets.push(this); }
+    send(data) { this.sent.push(data); }
+    close() { this.readyState = 3; this.emit('close'); }
+  }
+  const timers = new Map();
+  let timerId = 0, samples = 0, finishOld, finishNew;
+  const settings = { backendUrl: 'ws://127.0.0.1:8765/v1/stream', backendToken: '', polling_ms: 900,
+    mode: 'one_large_area', ocrLang: 'en', targetLanguage: 'zh-Hant' };
+  const { DesktopStream } = loadDesktopModule('src/main/backend-client.ts', {
+    ws: Socket,
+    './protocol': { parseServerMessage: JSON.parse, encodeImageEnvelope: header => Buffer.from(JSON.stringify(header)) },
+  }, {
+    URL,
+    setTimeout: (fn) => { timers.set(++timerId, fn); return timerId; },
+    clearTimeout: id => timers.delete(id),
+  });
+  const stream = new DesktopStream({ appVersion: 'test', getSettings: () => settings,
+    captureFrames: () => {
+      samples++;
+      if (samples === 1) return new Promise(resolve => { finishOld = resolve; });
+      return new Promise(resolve => { finishNew = resolve; });
+    }, onStatus() {}, onResult() {}, onClear() {},
+  });
+  stream.start();
+  const oldSession = stream.sessionId;
+  stream.handleMessage({ type: 'session.state', sessionId: oldSession, paused: false });
+  stream.clearCaptureTimer();
+  const oldCapture = stream.captureOnce();
+  settings.mode = 'multiple_regions';
+  stream.refreshCapture();
+  const newSession = stream.sessionId;
+  assert.notEqual(newSession, oldSession);
+  stream.handleMessage({ type: 'session.state', sessionId: newSession, paused: false });
+  stream.clearCaptureTimer();
+  const newCapture = stream.captureOnce();
+  assert.equal(samples, 2);
+  const frame = { regionId: 'region-1', width: 100, height: 50, jpeg: Buffer.from('frame') };
+  const scheduledBeforeOldCompletion = [...timers.entries()];
+  finishOld([frame]);
+  await oldCapture;
+  assert.equal(stream.captureRunningSession, newSession);
+  assert.deepEqual([...timers.entries()], scheduledBeforeOldCompletion);
+  await stream.captureOnce();
+  assert.equal(samples, 2); // Old completion did not unlock the new sample.
+  finishNew([frame]);
+  await newCapture;
+  const uploads = sockets[1].sent.filter(Buffer.isBuffer).map(data => JSON.parse(data.toString()));
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].sessionId, newSession);
+  assert.equal(sockets[0].sent.filter(Buffer.isBuffer).length, 0);
+  assert.equal(stream.captureRunningSession, null);
+  stream.stop();
+});
+
+test('stopping capture discards late old-mode frames without suppressing the new target', async () => {
+  let samples = 0, finishOld;
+  const image = { getSize: () => ({ width: 100, height: 50 }), toJPEG: () => Buffer.from('same-text') };
+  const capture = captureWithStreams(class {
+    async capture() {
+      if (++samples === 1) return new Promise(resolve => { finishOld = resolve; });
+      return image;
+    }
+    dispose() {}
+  });
+  const target = [{ regionId: 'region-1', display: { id: 1, scaleFactor: 1, bounds: { x: 0, y: 0, width: 100, height: 50 } } }];
+  const old = capture.capture(target);
+  capture.stop();
+  assert.equal((await capture.capture(target)).length, 1);
+  finishOld(image);
+  assert.equal((await old).length, 0);
+  assert.equal((await capture.capture(target)).length, 1);
+  capture.stop();
 });
 
 test('capture reuses one stream, samples fresh frames, and releases it on stop', async () => {

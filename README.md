@@ -54,10 +54,12 @@ Edit [services/backend/.env.example](services/backend/.env.example)'s local copy
 | `OVERLAY_BACKEND_PORT` | WebSocket port; default `8765` |
 | `OVERLAY_BACKEND_API_TOKEN` | Bearer token; required outside loopback |
 | `OVERLAY_ALLOW_INSECURE_LAN` | Set to `1` to allow a non-loopback `ws://` listener |
-| `OVERLAY_LLM_MODE` | `local` or `remote` |
+| `OVERLAY_LLM_MODE` | `local`, `remote` or `groq` |
 | `OVERLAY_LLM_MODEL_PATH` | Local GGUF file; absolute or relative to the repository root |
 | `OVERLAY_LLM_REMOTE_URL` | External translation API URL |
 | `OVERLAY_LLM_REMOTE_API_KEY` | External API bearer token |
+| `GROQ_API_KEY` | Groq API key; required in `groq` mode |
+| `OVERLAY_LLM_GROQ_MODEL` | Groq model; default `llama-3.3-70b-versatile` |
 | `OVERLAY_LLM_MAX_TOKENS` | Maximum generated tokens; template value `1024` |
 | `OVERLAY_LLM_N_CTX` | Context size; template value `4096` |
 | `OVERLAY_LLM_N_GPU_LAYERS` | GPU layers; template value `-1` |
@@ -82,6 +84,20 @@ OVERLAY_LLM_REMOTE_API_KEY=
 
 The external service must implement the
 [translation API contract](docs/app_lang_overlay_design.md#external-translation-api).
+
+For Groq translation, install the updated backend dependencies with
+`python -m pip install -e services/backend`, then set these values in
+`services/backend/.env` or your shell environment:
+
+```dotenv
+OVERLAY_LLM_MODE=groq
+GROQ_API_KEY=your-api-key-here
+OVERLAY_LLM_GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+Groq mode sends each OCR text block to Groq's chat completions API and does
+not require a local GGUF model. `OVERLAY_LLM_MAX_TOKENS` also controls the Groq
+output limit. Restart the backend after changing these settings.
 
 ## Desktop configuration
 

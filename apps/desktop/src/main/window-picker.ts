@@ -46,7 +46,8 @@ export class HoverWindowPicker {
       } catch (error) {
         if (!this.disposed) {
           this.error = error instanceof Error ? error.message : String(error);
-          this.publish();
+          if (this.onError) this.onError(new Error(this.error));
+          else this.publish();
         }
         return false;
       } finally { this.selecting = false; }
@@ -76,13 +77,15 @@ export class HoverWindowPicker {
       this.helper.on('error', (error) => {
         this.nativeWindows = [];
         this.error = `Window detection failed: ${error.message}. Run npm run build again.`;
-        this.publish();
+        if (this.onError) this.onError(new Error(this.error));
+        else this.publish();
       });
       this.helper.on('exit', () => {
         if (this.disposed) return;
         this.nativeWindows = [];
         this.error = 'Window detection stopped. Cancel and try again.';
-        this.publish();
+        if (this.onError) this.onError(new Error(this.error));
+        else this.publish();
       });
       this.timer = setInterval(() => this.publish(), 50);
       await Promise.all(screen.getAllDisplays().map(async (display) => {
@@ -116,6 +119,7 @@ export class HoverWindowPicker {
 
   // Main process provides cancellation so the previous selection/settings survive.
   onCancel: () => void = () => this.dispose();
+  onError?: (error: Error) => void;
   private cancel(): void { this.onCancel(); }
   private owns(sender: WebContents): boolean {
     return !this.disposed && this.windows.some((win) => !win.isDestroyed() && win.webContents === sender);

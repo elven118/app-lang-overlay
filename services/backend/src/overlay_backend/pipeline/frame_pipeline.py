@@ -9,7 +9,7 @@ from collections import OrderedDict
 from ..domain import ClientSession, ImageFrame, RegionState, TextBlock, TranslationBlock, TranslationResult
 from ..ocr import PaddleOcrProvider
 from ..translation import TranslationProvider
-from ..translation.providers import validate_translations
+from ..translation.common import validate_translations
 from .japanese_readings import source_reading_segments
 from .layout import LayoutAnalyzer
 

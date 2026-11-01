@@ -24,7 +24,7 @@ export type ProfileState = {
 };
 
 export type SourceLanguage = 'auto' | 'en' | 'ja' | 'ko' | 'zh-Hans' | 'zh-Hant';
-export type TargetLanguage = 'en' | 'zh-Hant' | 'ja';
+export type TargetLanguage = 'en' | 'ja' | 'ko' | 'zh-Hans' | 'zh-Hant';
 
 export type PlacementMode = 'above' | 'free';
 

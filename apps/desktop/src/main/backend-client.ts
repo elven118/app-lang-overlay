@@ -84,7 +84,7 @@ export class DesktopStream {
   private stopped = true;
   private ready = false;
   private paused = false;
-  private captureRunning = false;
+  private captureRunningSession: string | null = null;
   private captureFailed = false;
   private endpoint = '';
   private latestResultFrame = new Map<string, bigint>();
@@ -303,12 +303,12 @@ export class DesktopStream {
   }
 
   private async captureOnce(): Promise<void> {
-    if (this.captureRunning || this.stopped || !this.ready || this.paused) {
+    if (this.captureRunningSession === this.sessionId || this.stopped || !this.ready || this.paused) {
       this.scheduleCapture();
       return;
     }
-    this.captureRunning = true;
     const captureSessionId = this.sessionId;
+    this.captureRunningSession = captureSessionId;
     try {
       const frames = await this.options.captureFrames();
       if (captureSessionId !== this.sessionId) return;
@@ -353,8 +353,12 @@ export class DesktopStream {
       }
       this.captureFailed = true;
     } finally {
-      this.captureRunning = false;
-      this.scheduleCapture();
+      // An old worker may finish after a mode switch. It must not clear the
+      // new session's in-flight guard or replace its scheduled sample.
+      if (this.captureRunningSession === captureSessionId) {
+        this.captureRunningSession = null;
+        if (this.sessionId === captureSessionId) this.scheduleCapture();
+      }
     }
   }
 

@@ -292,8 +292,26 @@ async function persistSettings(next: OverlaySettings): Promise<void> {
 
 async function persistFromPanel(): Promise<void> {
   const next = parsePanelSettings();
+  const changingMode = next.mode !== settings.mode;
+  if (changingMode) {
+    // Close settings and release overlay interaction before main opens the
+    // target picker. The settings hint must not cover the selection either.
+    await togglePanel(false);
+    hide();
+  }
   syncSettingVisibility(next);
-  await persistSettings(next);
+  try {
+    await persistSettings(next);
+    if (changingMode && settings.mode !== next.mode) await togglePanel(true);
+  } catch (error) {
+    console.error('[overlay-settings]', error);
+    if (changingMode) {
+      settings = await window.overlayApi.getSettings();
+      setStyle(settings);
+      syncPanelFromSettings();
+      await togglePanel(true);
+    }
+  }
 }
 
 async function togglePanel(nextVisible: boolean): Promise<void> {
@@ -462,6 +480,7 @@ function installPanelEvents(): void {
   viewport = await window.overlayApi.getViewport();
   setStyle(settings);
   installPanelEvents();
+  syncPanelFromSettings();
   const latest = await window.overlayApi.getLatestTranslations();
   if (settings.mode === 'one_large_area') {
     const current = latest.at(-1);

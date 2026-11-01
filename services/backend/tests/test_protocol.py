@@ -7,7 +7,7 @@ from pathlib import Path
 
 from overlay_backend.api.protocol import encode_image_envelope, parse_image_envelope, parse_text_frame
 from overlay_backend.config import BackendSettings
-from overlay_backend.domain import ProtocolError
+from overlay_backend.domain import ClientSession, ProtocolError
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -15,6 +15,17 @@ FIXTURES = REPOSITORY_ROOT / "shared" / "protocol" / "v1" / "fixtures"
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_korean_and_simplified_chinese_settings_match_shared_contract(self) -> None:
+        schema = json.loads((FIXTURES.parent / "messages.schema.json").read_text(encoding="utf-8"))
+        for language in ("ko", "zh-Hans"):
+            with self.subTest(language=language):
+                session = ClientSession("test", "desktop")
+                session.update({"sourceLanguage": language, "targetLanguage": language})
+                self.assertEqual(session.source_language, language)
+                self.assertEqual(session.target_language, language)
+                self.assertIn(language, schema["$defs"]["sourceLanguage"]["enum"])
+                self.assertIn(language, schema["$defs"]["targetLanguage"]["enum"])
+
     def setUp(self) -> None:
         self.settings = BackendSettings()
 

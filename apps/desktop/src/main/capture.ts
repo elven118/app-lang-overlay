@@ -65,6 +65,7 @@ function encodeWithinLimit(image: NativeImage): { image: NativeImage; jpeg: Buff
 }
 
 export class DesktopCapture {
+  private generation = 0;
   private hashes = new Map<string, { value: string; repeats: number }>();
   private streams = new Map<string, Pick<ScreenStream, 'capture' | 'dispose'>>();
 
@@ -91,6 +92,7 @@ export class DesktopCapture {
   }
 
   async capture(targets: CaptureTarget[]): Promise<CapturedFrame[]> {
+    const generation = this.generation;
     const results: CapturedFrame[] = [];
     const bySource = new Map<string, CaptureTarget[]>();
     for (const target of targets) {
@@ -109,9 +111,11 @@ export class DesktopCapture {
     for (const sourceTargets of bySource.values()) {
       const display = sourceTargets[0].display;
       const image = await this.captureSource(sourceTargets[0]);
+      if (generation !== this.generation) return [];
       if (!image) continue;
       const windowBounds = sourceTargets[0].windowSource
         ? await readWindowBounds(sourceTargets[0].windowSource.id) : undefined;
+      if (generation !== this.generation) return [];
 
       for (const target of sourceTargets) {
         const cropped = cropForTarget(image, target);
@@ -162,6 +166,7 @@ export class DesktopCapture {
   }
 
   stop(): void {
+    this.generation += 1;
     for (const stream of this.streams.values()) stream.dispose();
     this.streams.clear();
     this.reset();
