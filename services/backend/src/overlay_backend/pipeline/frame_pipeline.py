@@ -9,6 +9,7 @@ from collections import OrderedDict
 from ..domain import ClientSession, ImageFrame, RegionState, TextBlock, TranslationBlock, TranslationResult
 from ..ocr import PaddleOcrProvider
 from ..translation import TranslationProvider
+from ..translation.providers import validate_translations
 from .japanese_readings import source_reading_segments
 from .layout import LayoutAnalyzer
 
@@ -90,9 +91,13 @@ class FramePipeline:
             region.empty_frame_count += 1
             return None
         region.empty_frame_count = 0
-        dedupe_key = hashlib.sha256(
-            f"{session.source_language}|{session.target_language}|{source_text}".encode("utf-8")
-        ).hexdigest()[:16]
+        # Include IDs and block boundaries: a cached translation must never be
+        # attached to a differently segmented frame or a different client's IDs.
+        fingerprint = json.dumps([
+            session.source_language, session.target_language,
+            [(item.id, " ".join(item.text.split())) for item in ordered],
+        ], ensure_ascii=False)
+        dedupe_key = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
         if dedupe_key == region.last_dedupe_key:
             return None
 
@@ -110,26 +115,14 @@ class FramePipeline:
                 session.source_language,
                 session.target_language,
             )
+            translated_by_id = validate_translations(translated_by_id, ordered)
             self.cache.put(cache_key, translated_by_id)
         translation_ms = (time.perf_counter() - translation_started) * 1000
-
-        expected_ids = {item.id for item in ordered}
-        aligned = set(translated_by_id) == expected_ids
-        if aligned:
-            combined_fallback = ""
-        else:
-            combined_fallback = str(translated_by_id.get("__combined__", "")).strip()
-            if not combined_fallback:
-                combined_fallback = "\n".join(
-                    str(value).strip()
-                    for key, value in translated_by_id.items()
-                    if key != "__combined__" and str(value).strip()
-                )
 
         translated_blocks = [
             TranslationBlock(
                 source=item,
-                translated_text=str(translated_by_id.get(item.id, "")) if aligned else "",
+                translated_text=translated_by_id[item.id],
                 source_reading_segments=(
                     source_reading_segments(item.text)
                     if session.source_language == "ja"
@@ -138,9 +131,7 @@ class FramePipeline:
             )
             for item in ordered
         ]
-        combined_translation = combined_fallback or "\n".join(
-            item.translated_text for item in translated_blocks if item.translated_text.strip()
-        ).strip()
+        combined_translation = "\n".join(item.translated_text for item in translated_blocks)
         region.last_dedupe_key = dedupe_key
         return TranslationResult(
             session_id=session.session_id,
