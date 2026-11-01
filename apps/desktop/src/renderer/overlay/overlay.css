@@ -75,6 +75,8 @@ html, body {
 .block-overlay[hidden] { display: none; }
 .block-overlay .line { text-align: left; writing-mode: horizontal-tb; }
 .block-source { display: var(--show-source); font-size: var(--source-font-size); color: var(--text-color); }
+#source ruby, .block-source ruby { ruby-position: over; }
+#source rt, .block-source rt { font-size: 0.5em; font-weight: normal; }
 .block-translation { display: var(--show-translation, block); font-size: var(--translated-font-size); color: var(--translate-color); }
 #source:empty, #translated:empty, .block-source:empty, .block-translation:empty { display: none; }
 

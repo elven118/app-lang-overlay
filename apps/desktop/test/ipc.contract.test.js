@@ -418,6 +418,54 @@ test('multiple-region images form one card while selected-window images retain i
   assert.equal(result.blocks.length, 2);
 });
 
+test('combined-region cards preserve readings in order and fall back when source text differs', () => {
+  const { overlayCards } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {});
+  const segments = [{ text: '\u6f22\u5b57', reading: '\u304b\u3093\u3058' }];
+  const result = {
+    regionId: 'region', combinedSourceText: '\u6f22\u5b57\nkana', combinedTranslatedText: 'Translation',
+    blocks: [
+      { text: 'kana', readingOrder: 1, sourceReadingSegments: null },
+      { text: '\u6f22\u5b57', readingOrder: 0, sourceReadingSegments: segments },
+    ],
+  };
+  const card = overlayCards(result, 'multiple_regions')[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(card.sourceReadingSegments)), [
+    ...segments, { text: '\n', reading: null }, { text: 'kana', reading: null },
+  ]);
+  assert.equal(overlayCards({ ...result, combinedSourceText: 'Different source' }, 'multiple_regions')[0].sourceReadingSegments, null);
+});
+
+test('source readings render as safe ruby nodes with plain kana and a fallback for mismatched text', () => {
+  const element = (tag) => ({
+    tag, style: {}, dataset: {}, children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    remove() { },
+  });
+  const { BlockOverlays } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {}, {
+    document: { createElement: element, createTextNode: (text) => ({ textContent: text }) },
+    ResizeObserver: class { observe() { } unobserve() { } },
+    clearTimeout() { },
+  });
+  const container = element('div');
+  const layer = new BlockOverlays(container);
+  const block = {
+    id: 'a', text: '\u6f22\u5b57\u306f<script>', translatedText: 'Translation', readingOrder: 0,
+    sourceReadingSegments: [
+      { text: '\u6f22\u5b57', reading: '\u304b\u3093\u3058' },
+      { text: '\u306f<script>', reading: null },
+    ],
+  };
+  layer.show({ regionId: 'region', sessionId: 'session', frameId: '1', blocks: [block] });
+  const source = container.children[0].children[0];
+  assert.equal(source.children[0].tag, 'ruby');
+  assert.equal(source.children[0].children[0].textContent, '\u6f22\u5b57');
+  assert.equal(source.children[0].children[1].tag, 'rt');
+  assert.equal(source.children[0].children[1].textContent, '\u304b\u3093\u3058');
+  assert.equal(source.children[1].textContent, '\u306f<script>');
+  layer.show({ regionId: 'region', sessionId: 'session', frameId: '2', blocks: [{ ...block, text: 'Different source' }] });
+  assert.equal(container.children[1].children[0].textContent, 'Different source');
+});
+
 test('selected-window cards preserve source blocks without falling back to combined translations', () => {
   const { overlayCards } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {});
   const result = {
@@ -682,6 +730,35 @@ test('cards with no visible text hide their background and react to Show Source 
   assert.deepEqual(container.children.map(node => node.style.display), ['', 'none', '']);
   layer.configure({ ...settings, translatedFontSize: 0 }, viewport);
   assert.deepEqual(container.children.map(node => node.style.display), ['none', 'none', 'none']);
+});
+
+test('one-large-area results render readings in the combined subtitle', () => {
+  const element = (tag) => ({
+    tag, children: [], append(...nodes) { this.children.push(...nodes); },
+  });
+  const helpers = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {}, {
+    document: { createElement: element, createTextNode: (text) => ({ textContent: text }) },
+  });
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay/overlay.ts'), 'utf8');
+  const fn = source.slice(source.indexOf('function showResult('), source.indexOf('async function copyCurrentText('));
+  const sourceEl = element('div');
+  let shown, placed = false;
+  const context = {
+    settings: { mode: 'one_large_area', autoHideMs: -1 }, sourceEl,
+    overlayCards: helpers.overlayCards, renderSource: helpers.renderSource,
+    show: (...args) => { shown = args; sourceEl.textContent = args[0]; },
+    applyPlacement: () => { placed = true; },
+  };
+  require('node:vm').runInNewContext(require('typescript').transpileModule(fn, {}).outputText, context);
+  context.showResult({
+    regionId: 'region', combinedSourceText: '\u6f22\u5b57', combinedTranslatedText: 'Kanji',
+    blocks: [{ text: '\u6f22\u5b57', readingOrder: 0,
+      sourceReadingSegments: [{ text: '\u6f22\u5b57', reading: '\u304b\u3093\u3058' }] }],
+  });
+  assert.deepEqual(shown, ['\u6f22\u5b57', 'Kanji', -1]);
+  assert.equal(sourceEl.children[0].tag, 'ruby');
+  assert.equal(sourceEl.children[0].children[1].textContent, '\u304b\u3093\u3058');
+  assert.equal(placed, true);
 });
 
 test('combined subtitle hides its background when source is off and translation is whitespace', () => {

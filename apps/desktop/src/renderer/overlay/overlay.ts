@@ -1,5 +1,5 @@
 import type { CaptureRegion, DesktopTranslationResult, OverlaySettings, OverlayViewport } from '../../shared/types';
-import { BlockOverlays } from './block-overlays';
+import { BlockOverlays, overlayCards, renderSource } from './block-overlays';
 
 const sourceEl = document.getElementById('source') as HTMLDivElement;
 const translatedEl = document.getElementById('translated') as HTMLDivElement;
@@ -161,6 +161,9 @@ function show(sourceText: string, translatedText: string | null, hideAfterMs: nu
 function showResult(result: DesktopTranslationResult): void {
   if (settings.mode === 'one_large_area') {
     show(result.combinedSourceText, result.combinedTranslatedText, settings.autoHideMs);
+    const combined = overlayCards(result, 'multiple_regions')[0];
+    renderSource(sourceEl, combined.text, combined.sourceReadingSegments);
+    applyPlacement(settings);
   } else {
     latestSourceText = result.combinedSourceText;
     latestTranslatedText = result.combinedTranslatedText;
@@ -463,7 +466,7 @@ function installPanelEvents(): void {
   if (settings.mode === 'one_large_area') {
     const current = latest.at(-1);
     if (current) {
-      show(current.combinedSourceText, current.combinedTranslatedText, settings.autoHideMs);
+      showResult(current);
     } else {
       show('Overlay ready', `Profile: ${profileId}`, 5000);
     }

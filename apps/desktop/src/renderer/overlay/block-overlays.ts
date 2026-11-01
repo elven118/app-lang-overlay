@@ -1,13 +1,42 @@
-import type { CaptureMode, DesktopRect, DesktopTranslationResult, OverlaySettings, OverlayViewport, TranslationBlock } from '../../shared/types';
+import type { CaptureMode, DesktopRect, DesktopTranslationResult, OverlaySettings, OverlayViewport, SourceReadingSegment, TranslationBlock } from '../../shared/types';
 
-type OverlayCard = Pick<TranslationBlock, 'id' | 'text' | 'translatedText' | 'bounds' | 'readingOrder'>;
+type OverlayCard = Pick<TranslationBlock, 'id' | 'text' | 'translatedText' | 'bounds' | 'readingOrder' | 'sourceReadingSegments'>;
+
+export function renderSource(source: HTMLElement, text: string, segments?: SourceReadingSegment[] | null): void {
+  source.textContent = '';
+  if (!segments?.length || segments.map((segment) => segment.text).join('') !== text) {
+    source.textContent = text.trim();
+    return;
+  }
+  for (const segment of segments) {
+    if (!segment.reading) {
+      source.append(document.createTextNode(segment.text));
+      continue;
+    }
+    const ruby = document.createElement('ruby');
+    const rt = document.createElement('rt');
+    ruby.append(document.createTextNode(segment.text));
+    rt.textContent = segment.reading;
+    ruby.append(rt);
+    source.append(ruby);
+  }
+}
 
 export function overlayCards(result: DesktopTranslationResult, mode: CaptureMode): OverlayCard[] {
-  if (mode === 'multiple_regions') return [{
-    id: result.regionId, text: result.combinedSourceText, translatedText: result.combinedTranslatedText,
-    bounds: { x: 0, y: 0, width: 1, height: 1 }, readingOrder: 0,
-  }];
-  return [...result.blocks].sort((a, b) => a.readingOrder - b.readingOrder);
+  const ordered = [...result.blocks].sort((a, b) => a.readingOrder - b.readingOrder);
+  if (mode === 'multiple_regions') {
+    const segments = ordered.filter((block) => block.text.trim()).flatMap((block, index) => [
+      ...(index ? [{ text: '\n', reading: null }] : []),
+      ...(block.sourceReadingSegments?.length ? block.sourceReadingSegments : [{ text: block.text, reading: null }]),
+    ]);
+    return [{
+      id: result.regionId, text: result.combinedSourceText, translatedText: result.combinedTranslatedText,
+      // Fall back to plain text if server whitespace normalization changed the source.
+      sourceReadingSegments: segments.map((segment) => segment.text).join('') === result.combinedSourceText ? segments : null,
+      bounds: { x: 0, y: 0, width: 1, height: 1 }, readingOrder: 0,
+    }];
+  }
+  return ordered;
 }
 
 export function projectBlock(bounds: DesktopRect, capture: DesktopRect): DesktopRect {
@@ -53,7 +82,7 @@ export class BlockOverlays {
       card.dataset.regionId = result.regionId;
       const source = document.createElement('div');
       source.className = 'line block-source';
-      source.textContent = block.text.trim();
+      renderSource(source, block.text, block.sourceReadingSegments);
       const translation = document.createElement('div');
       translation.className = 'line block-translation';
       translation.textContent = block.translatedText.trim();
