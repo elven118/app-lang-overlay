@@ -36,14 +36,19 @@ const mainConfig = {
   },
   plugins: [{ apply(compiler) {
     compiler.hooks.afterEmit.tap('BuildNativeHelpers', () => {
+      if (process.platform === 'win32') {
+        const output = path.join(__dirname, 'dist/native/windows');
+        fs.mkdirSync(output, { recursive: true });
+        fs.copyFileSync(path.join(__dirname, 'native/windows/window-picker.ps1'), path.join(output, 'window-picker.ps1'));
+      }
       if (process.platform !== 'darwin') return;
-      const output = path.join(__dirname, 'dist/native');
+      const output = path.join(__dirname, 'dist/native/macos');
       fs.mkdirSync(output, { recursive: true });
       execFileSync('xcrun', ['clang', '-fobjc-arc', '-O2',
-        path.join(__dirname, 'native/window-picker.m'), '-framework', 'Foundation',
+        path.join(__dirname, 'native/macos/window-picker.m'), '-framework', 'Foundation',
         '-framework', 'CoreGraphics', '-o', path.join(output, 'window-picker')], { stdio: 'inherit' });
       execFileSync('xcrun', ['clang', '-fobjc-arc', '-O2',
-        path.join(__dirname, 'native/display-capture.m'), '-framework', 'Foundation',
+        path.join(__dirname, 'native/macos/display-capture.m'), '-framework', 'Foundation',
         '-framework', 'ScreenCaptureKit', '-framework', 'ImageIO', '-framework', 'CoreGraphics',
         '-o', path.join(output, 'display-capture')], { stdio: 'inherit' });
     });

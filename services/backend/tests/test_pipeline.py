@@ -35,6 +35,26 @@ class LayoutTests(unittest.TestCase):
 
 
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_combined_translation_keeps_ocr_blocks_and_complete_translation(self) -> None:
+        class CombinedTranslator:
+            revision = "combined-test"
+
+            async def translate_blocks(self, blocks, source_language, target_language):
+                return {"__combined__": "Combined translation"}
+
+        pipeline = FramePipeline(_UnusedOcr(), CombinedTranslator())  # type: ignore[arg-type]
+        session = ClientSession("one", "desktop")
+        session.source_language = "en"
+        result = await pipeline.process_text(
+            session, session.region("window-1"), "window-1", "1",
+            [block("a", "First", .1, .1), block("b", "Second", .1, .3)], "server-onnx",
+        )
+        self.assertIsNotNone(result)
+        payload = result.as_dict()
+        self.assertEqual(payload["combinedTranslatedText"], "Combined translation")
+        self.assertEqual([item["text"] for item in payload["blocks"]], ["First", "Second"])
+        self.assertTrue(all(item["translatedText"] == "" for item in payload["blocks"]))
+
     async def test_translation_deduplicates_within_one_region(self) -> None:
         pipeline = FramePipeline(_UnusedOcr(), StubTranslationProvider())  # type: ignore[arg-type]
         session = ClientSession("one", "ios")
@@ -61,6 +81,22 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(first)
         self.assertIsNotNone(second)
+
+    async def test_same_text_with_new_ocr_ids_keeps_translations_aligned(self) -> None:
+        pipeline = FramePipeline(_UnusedOcr(), StubTranslationProvider())  # type: ignore[arg-type]
+        first_session = ClientSession("first", "desktop")
+        second_session = ClientSession("second", "desktop")
+        await pipeline.process_text(
+            first_session, first_session.region("window"), "window", "1",
+            [block("old-a", "First", .1, .1), block("old-b", "Second", .1, .3)], "server-onnx",
+        )
+        second = await pipeline.process_text(
+            second_session, second_session.region("window"), "window", "1",
+            [block("new-a", "First", .1, .1), block("new-b", "Second", .1, .3)], "server-onnx",
+        )
+        payload = second.as_dict()
+        self.assertEqual([item["id"] for item in payload["blocks"]], ["new-a", "new-b"])
+        self.assertTrue(all(item["translatedText"] for item in payload["blocks"]))
 
 
 if __name__ == "__main__":

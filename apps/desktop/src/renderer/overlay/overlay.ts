@@ -130,7 +130,10 @@ function setStyle(nextSettings: OverlaySettings): void {
   document.documentElement.style.setProperty('--translate-color', nextSettings.translateColor);
   document.documentElement.style.setProperty('--bg', nextSettings.background);
   document.documentElement.style.setProperty('--width', `${nextSettings.width}px`);
-  document.documentElement.style.setProperty('--show-source', nextSettings.showSource ? 'block' : 'none');
+  document.documentElement.style.setProperty('--show-source', nextSettings.showSource && nextSettings.sourceFontSize > 0 ? 'block' : 'none');
+  document.documentElement.style.setProperty('--show-translation', nextSettings.translatedFontSize > 0 ? 'block' : 'none');
+  box.style.display = ((nextSettings.showSource && nextSettings.sourceFontSize > 0 && latestSourceText.trim())
+    || (nextSettings.translatedFontSize > 0 && latestTranslatedText.trim())) ? '' : 'none';
 
   box.classList.toggle('draggable', panelVisible && nextSettings.mode === 'one_large_area');
   blockOverlays.configure(nextSettings, viewport);
@@ -140,8 +143,10 @@ function setStyle(nextSettings: OverlaySettings): void {
 function show(sourceText: string, translatedText: string | null, hideAfterMs: number): void {
   latestSourceText = sourceText || '';
   latestTranslatedText = translatedText || '';
-  if (sourceEl) sourceEl.textContent = sourceText || '';
-  translatedEl.textContent = translatedText || '';
+  if (sourceEl) sourceEl.textContent = latestSourceText.trim();
+  translatedEl.textContent = latestTranslatedText.trim();
+  box.style.display = ((settings.showSource && settings.sourceFontSize > 0 && latestSourceText.trim())
+    || (settings.translatedFontSize > 0 && latestTranslatedText.trim())) ? '' : 'none';
   box.classList.remove('hidden');
   box.classList.add('visible');
   if (hideTimer) clearTimeout(hideTimer);

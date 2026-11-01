@@ -16,7 +16,7 @@ export class MacDisplayCapture {
     const args = [String(this.display.id), String(Math.round(this.display.bounds.width * scale)),
       String(Math.round(this.display.bounds.height * scale)), this.excludedWindowIds().join(',')];
     const bytes = await new Promise<Buffer>((resolve, reject) => {
-      this.child = execFile(path.join(__dirname, 'native/display-capture'), args,
+      this.child = execFile(path.join(__dirname, 'native/macos/display-capture'), args,
         { encoding: 'buffer', timeout: 17000, maxBuffer: 128 * 1024 * 1024 }, (error, stdout, stderr) => {
           this.child = undefined;
           if (error) reject(new Error(`Display ${this.display.id}: ${stderr.toString().trim() || error.message}`));

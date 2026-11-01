@@ -100,19 +100,24 @@ test('selection preview loops over all regions on the display and removes stale 
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay/overlay.ts'), 'utf8');
   const fn = source.slice(source.indexOf('function syncSelectionArea('), source.indexOf('function applyPlacement('));
   const classes = new Set();
-  const selectionArea = { children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); },
-    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) } };
-  const context = { selectionArea, panelVisible: true, selectionPreviewVisible: false,
+  const selectionArea = {
+    children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); },
+    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name) }
+  };
+  const context = {
+    selectionArea, panelVisible: true, selectionPreviewVisible: false,
     viewport: { bounds: { x: -1000, y: 0, width: 1000, height: 800 } },
     document: { createElement: () => ({ style: {} }) },
     getCaptureRegion: (settings) => settings.mode === 'selected_window' ? null : settings.captureRegion,
   };
   vm.runInNewContext(ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
-  const settings = { mode: 'multiple_regions', captureRegions: [
-    { left: -900, top: 100, width: 200, height: 80 },
-    { left: -500, top: 300, width: 300, height: 120 },
-    { left: 100, top: 100, width: 100, height: 80 }, // Another display.
-  ] };
+  const settings = {
+    mode: 'multiple_regions', captureRegions: [
+      { left: -900, top: 100, width: 200, height: 80 },
+      { left: -500, top: 300, width: 300, height: 120 },
+      { left: 100, top: 100, width: 100, height: 80 }, // Another display.
+    ]
+  };
   context.syncSelectionArea(settings);
   assert.equal(selectionArea.children.length, 2);
   assert.equal(selectionArea.children[0].style.left, '100px');
@@ -135,14 +140,17 @@ test('preview settings derive every region from the canonical profile with per-d
   const ts = require('typescript'), vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
   const fn = source.slice(source.indexOf('function withCaptureRegionPreviews('), source.indexOf('function saveOverlaySettings('));
-  const context = { process: { platform: 'win32' }, normalizeCaptureRegions: (regions) => regions || [],
+  const context = {
+    process: { platform: 'win32' }, normalizeCaptureRegions: (regions) => regions || [],
     normalizeCaptureRegion: (region) => region,
     displayForCaptureRegion: (region) => ({ scaleFactor: region.left < 0 ? 2 : 1 }),
   };
   vm.runInNewContext(ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
-  const profile = { capture_regions: [
-    { left: -1800, top: 200, width: 400, height: 160 }, { left: 100, top: 300, width: 300, height: 120 },
-  ] };
+  const profile = {
+    capture_regions: [
+      { left: -1800, top: 200, width: 400, height: 160 }, { left: 100, top: 300, width: 300, height: 120 },
+    ]
+  };
   const result = context.withCaptureRegionPreviews({ mode: 'multiple_regions' }, profile, {});
   assert.deepEqual(JSON.parse(JSON.stringify(result.captureRegions)), [
     { left: -900, top: 100, width: 200, height: 80 }, { left: 100, top: 300, width: 300, height: 120 },
@@ -275,17 +283,23 @@ function pickerHarness(multiple, regions = [], otherRegionCount = 0) {
   const submissions = [];
   let start, cancelled = 0;
   function element() {
-    return { style: {}, children: [], events: new Map(), hidden: false, disabled: false,
+    return {
+      style: {}, children: [], events: new Map(), hidden: false, disabled: false,
       append(...nodes) { this.children.push(...nodes); }, replaceChildren() { this.children = []; },
-      setAttribute() {}, addEventListener(name, handler) { this.events.set(name, handler); }, closest() { return null; } };
+      setAttribute() { }, addEventListener(name, handler) { this.events.set(name, handler); }, closest() { return null; }
+    };
   }
   loadDesktopModule('src/renderer/picker/picker.ts', {}, {
-    document: { getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
-      createElement: element, body: { classList: { add() {} } }, addEventListener: (name, fn) => events.set(name, fn) },
-    window: { innerWidth: 1000, innerHeight: 800, pickerApi: {
-      onStartDrag: (fn) => { start = fn; }, select() {},
-      async submit(value) { submissions.push(value); return { status: 'ok' }; }, async cancel() { cancelled++; },
-    } },
+    document: {
+      getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
+      createElement: element, body: { classList: { add() { } } }, addEventListener: (name, fn) => events.set(name, fn)
+    },
+    window: {
+      innerWidth: 1000, innerHeight: 800, pickerApi: {
+        onStartDrag: (fn) => { start = fn; }, select() { },
+        async submit(value) { submissions.push(value); return { status: 'ok' }; }, async cancel() { cancelled++; },
+      }
+    },
   });
   start({ multiple, regions, otherRegionCount, originX: -1000, originY: -100, captureScaleFactor: 2 });
   function drag(x1, y1, x2, y2) {
@@ -304,7 +318,7 @@ test('multi-region picker stages several rectangles and removals before one scal
   assert.equal(p.submissions.length, 0);
   assert.equal(p.elements.get('saved-regions').children.length, 2);
   p.elements.get('saved-regions').children[0].children[1].events.get('click')();
-  p.events.get('keydown')({ key: 'Enter', preventDefault() {} });
+  p.events.get('keydown')({ key: 'Enter', preventDefault() { } });
   await Promise.resolve();
   assert.deepEqual(JSON.parse(JSON.stringify(p.submissions)), [[{ left: -1400, top: 200, width: 300, height: 120 }]]);
 });
@@ -344,9 +358,9 @@ test('multi-region submit validates the sender and bounds, commits once, and pre
     loadProfile: () => ({ capture_regions: [remote, old] }), normalizeCaptureRegions: (regions) => regions || [],
     displayForCaptureRegion: (r) => ({ id: r.left < 0 ? 2 : 1 }),
     saveCaptureRegion: (...args) => writes.push(args),
-    latestTranslations: new Map(), captureBounds: new Map(), desktopCapture: { reset() {} },
-    desktopStream: { refreshCapture() {} }, refreshOverlayWindowForProfile() {}, closeRegionPickerWindows() {},
-    publishProfileState() {},
+    latestTranslations: new Map(), captureBounds: new Map(), desktopCapture: { reset() { } },
+    desktopStream: { refreshCapture() { } }, refreshOverlayWindowForProfile() { }, closeRegionPickerWindows() { },
+    publishProfileState() { },
     profileStore: { pathFor: () => '/profiles/test.json' },
   });
   const region = { left: 200, top: 200, width: 100, height: 80 };
@@ -375,7 +389,7 @@ test('every capture mode change opens selection and leaves persisted mode unchan
         profileId: 'test', ipcMain: { handle: (_name, fn) => { save = fn; } },
         getOverlaySettings: () => persisted,
         openRegionPickerWindows: async (settings) => { opened = settings; },
-        toggleOverlayPanel() {},
+        toggleOverlayPanel() { },
         saveOverlaySettings() { assert.fail('Mode must not persist before selection'); },
       });
       const payload = { mode: after };
@@ -388,11 +402,13 @@ test('every capture mode change opens selection and leaves persisted mode unchan
 
 test('multiple-region images form one card while selected-window images retain individual blocks', () => {
   const { overlayCards } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {});
-  const result = { ...fixture('translation.result.non-japanese.json'), regionId: 'region-2',
+  const result = {
+    ...fixture('translation.result.non-japanese.json'), regionId: 'region-2',
     combinedSourceText: 'First\nSecond', combinedTranslatedText: '一\n二', blocks: [
       { id: 'second', text: 'Second', translatedText: '二', readingOrder: 1, bounds: { x: .1, y: .5, width: .3, height: .1 } },
       { id: 'first', text: 'First', translatedText: '一', readingOrder: 0, bounds: { x: .1, y: .1, width: .3, height: .1 } },
-    ] };
+    ]
+  };
   const grouped = overlayCards(result, 'multiple_regions');
   assert.equal(grouped.length, 1);
   assert.equal(grouped[0].text, 'First\nSecond');
@@ -400,6 +416,21 @@ test('multiple-region images form one card while selected-window images retain i
   assert.deepEqual(JSON.parse(JSON.stringify(grouped[0].bounds)), { x: 0, y: 0, width: 1, height: 1 });
   assert.deepEqual(Array.from(overlayCards(result, 'selected_window'), (card) => card.id), ['first', 'second']);
   assert.equal(result.blocks.length, 2);
+});
+
+test('selected-window cards preserve source blocks without falling back to combined translations', () => {
+  const { overlayCards } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {});
+  const result = {
+    ...fixture('translation.result.non-japanese.json'), regionId: 'window-1',
+    combinedSourceText: 'First\nSecond', combinedTranslatedText: 'Combined translation', blocks: [
+      { id: 'first', text: 'First', translatedText: '', readingOrder: 0, bounds: { x: .25, y: .125, width: .25, height: .125 } },
+      { id: 'second', text: 'Second', translatedText: '', readingOrder: 1, bounds: { x: .125, y: .5, width: .5, height: .125 } },
+    ]
+  };
+  const cards = overlayCards(result, 'selected_window');
+  assert.deepEqual(JSON.parse(JSON.stringify(cards)), result.blocks);
+  const emptyBlocks = overlayCards({ ...result, blocks: [] }, 'selected_window');
+  assert.equal(emptyBlocks.length, 0);
 });
 
 test('confirmed area selection persists its pending mode and settings with the selected rectangles', () => {
@@ -428,13 +459,13 @@ test('confirmed area selection persists its pending mode and settings with the s
   }
 });
 
-function captureWithStreams(ScreenStream) {
+function captureWithStreams(ScreenStream, platform = process.platform) {
   const { DesktopCapture } = loadDesktopModule('src/main/capture.ts', {
     './mac-display-capture': { MacDisplayCapture: ScreenStream },
     './window-bounds': { readWindowBounds: async () => undefined },
     './screen-stream': { ScreenStream, captureWorkerPage: () => 'worker.html' },
     './protocol': { MAX_IMAGE_BYTES: 4 * 1024 * 1024 },
-  });
+  }, { process: { platform } });
   return new DesktopCapture();
 }
 
@@ -444,7 +475,7 @@ test('macOS area capture uses native exclusion while selected windows keep Elect
     class ElectronStream {
       constructor(_display, _page, windowId) { sources.push({ kind: 'electron', windowId }); }
       async capture() { return { getSize: () => ({ width: 800, height: 600 }), toJPEG: () => Buffer.from('frame') }; }
-      dispose() {}
+      dispose() { }
     }
     class NativeCapture extends ElectronStream {
       constructor(display, exclusions) {
@@ -461,7 +492,7 @@ test('macOS area capture uses native exclusion while selected windows keep Elect
     const capture = new DesktopCapture(undefined, undefined, () => ['42', '43']);
     const display = { id: 2, bounds: { x: 0, y: 0, width: 800, height: 600 }, scaleFactor: 1 };
     await capture.capture([{ regionId: 'area', display },
-      { regionId: 'window', display, windowSource: { id: 'window:99:0', name: 'Reader' } }]);
+    { regionId: 'window', display, windowSource: { id: 'window:99:0', name: 'Reader' } }]);
     assert.equal(sources[0].kind, platform === 'darwin' ? 'native' : 'electron');
     if (platform === 'darwin') assert.deepEqual(Array.from(sources[0].ids), ['42', '43']);
     assert.equal(sources[1].kind, 'electron');
@@ -474,11 +505,13 @@ test('native capture passes Retina dimensions and current overlay IDs without sa
   const calls = [];
   let ids = ['42'];
   const { MacDisplayCapture } = loadDesktopModule('src/main/mac-display-capture.ts', {
-    'node:child_process': { execFile(binary, args, options, callback) {
-      calls.push({ binary, args, options });
-      queueMicrotask(() => callback(null, Buffer.from('PNG bytes'), Buffer.alloc(0)));
-      return { kill() {} };
-    } },
+    'node:child_process': {
+      execFile(binary, args, options, callback) {
+        calls.push({ binary, args, options });
+        queueMicrotask(() => callback(null, Buffer.from('PNG bytes'), Buffer.alloc(0)));
+        return { kill() { } };
+      }
+    },
     electron: { nativeImage: { createFromBuffer: () => ({ isEmpty: () => false }) } },
   });
   const capture = new MacDisplayCapture({ id: 7, scaleFactor: 2, bounds: { width: 1200, height: 800 } }, () => ids);
@@ -487,7 +520,7 @@ test('native capture passes Retina dimensions and current overlay IDs without sa
   await capture.capture();
   assert.deepEqual(Array.from(calls[0].args), ['7', '2400', '1600', '42']);
   assert.deepEqual(Array.from(calls[1].args), ['7', '2400', '1600', '43,44']);
-  assert.ok(calls[0].binary.endsWith('/native/display-capture'));
+  assert.equal(calls[0].binary, path.join(path.dirname(path.join(__dirname, '../src/main/mac-display-capture.ts')), 'native/macos/display-capture'));
   assert.equal(calls[0].options.encoding, 'buffer');
   capture.dispose();
   await assert.rejects(capture.capture(), /stopped/);
@@ -497,10 +530,12 @@ test('native capture surfaces failures and cancels in-flight work on dispose', a
   let finish;
   let killed = false;
   const { MacDisplayCapture } = loadDesktopModule('src/main/mac-display-capture.ts', {
-    'node:child_process': { execFile(_binary, _args, _options, callback) {
-      finish = callback;
-      return { kill() { killed = true; finish(new Error('stopped'), Buffer.alloc(0), Buffer.from('capture cancelled')); } };
-    } }, electron: {},
+    'node:child_process': {
+      execFile(_binary, _args, _options, callback) {
+        finish = callback;
+        return { kill() { killed = true; finish(new Error('stopped'), Buffer.alloc(0), Buffer.from('capture cancelled')); } };
+      }
+    }, electron: {},
   });
   const capture = new MacDisplayCapture({ id: 7, scaleFactor: 1, bounds: { width: 800, height: 600 } }, () => []);
   const pending = capture.capture();
@@ -515,14 +550,15 @@ test('Windows overlay protection is enabled before the window is shown', () => {
   const fn = source.slice(source.indexOf('function createOverlayWindow('), source.indexOf('function createControlWindow('));
   const calls = [];
   class Window {
-    constructor(options) { assert.equal(options.show, false); this.webContents = { on() {} }; }
+    constructor(options) { assert.equal(options.show, false); this.webContents = { on() { } }; }
     setContentProtection(value) { calls.push(['protect', value]); }
     show() { calls.push(['show']); }
-    setVisibleOnAllWorkspaces() {}
-    loadFile() {}
-    setIgnoreMouseEvents() {}
+    setVisibleOnAllWorkspaces() { }
+    loadFile() { }
+    setIgnoreMouseEvents() { }
   }
-  const context = { BrowserWindow: Window, process: { platform: 'win32' },
+  const context = {
+    BrowserWindow: Window, process: { platform: 'win32' },
     profileId: 'test', loadProfile: () => ({}), getTargetDisplay: () => ({ bounds: { x: 0, y: 0, width: 800, height: 600 } }),
     path, __dirname: '/dist',
   };
@@ -552,13 +588,15 @@ test('block cards preserve other regions, reject stale frames, and clear only th
   const timers = new Map();
   let nextTimer = 0;
   function element() {
-    return { style: {}, dataset: {}, children: [], hidden: false,
+    return {
+      style: {}, dataset: {}, children: [], hidden: false,
       append(...nodes) { this.children.push(...nodes); },
-      remove() { this.removed = true; }, getBoundingClientRect: () => ({ width: 240, height: 80 }) };
+      remove() { this.removed = true; }, getBoundingClientRect: () => ({ width: 240, height: 80 })
+    };
   }
   const { BlockOverlays } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {}, {
     document: { createElement: element },
-    ResizeObserver: class { observe() {} unobserve() {} },
+    ResizeObserver: class { observe() { } unobserve() { } },
     setTimeout: (callback) => { timers.set(++nextTimer, callback); return nextTimer; },
     clearTimeout: (id) => timers.delete(id),
   });
@@ -567,10 +605,13 @@ test('block cards preserve other regions, reject stale frames, and clear only th
   layer.configure({ width: 500, autoHideMs: 1000 }, {
     bounds: { x: 0, y: 0, width: 1000, height: 800 }, workArea: { x: 0, y: 25, width: 1000, height: 775 },
   });
-  const makeResult = (regionId, frameId) => ({ ...fixture('translation.result.non-japanese.json'),
+  const makeResult = (regionId, frameId) => ({
+    ...fixture('translation.result.non-japanese.json'),
     sessionId: 'session', regionId, frameId, captureBounds: { x: 0, y: 0, width: 1000, height: 800 },
-    blocks: [{ id: 'a', text: '<script>source</script>', translatedText: 'Translation', readingOrder: 0,
-      bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 } }],
+    blocks: [{
+      id: 'a', text: '<script>source</script>', translatedText: 'Translation', readingOrder: 0,
+      bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 }
+    }],
   });
   const active = () => container.children.filter((node) => !node.removed);
   layer.show(makeResult('region-1', '1'));
@@ -607,24 +648,89 @@ test('block cards preserve other regions, reject stale frames, and clear only th
   assert.equal(active()[0].style.width, '1000px');
 });
 
-test('cropped frame geometry projects into global logical coordinates on a Retina display', async () => {
+test('cards with no visible text hide their background and react to Show Source changes', () => {
+  const element = () => ({
+    style: {}, dataset: {}, children: [],
+    append(...nodes) { this.children.push(...nodes); },
+    remove() { }, getBoundingClientRect: () => ({ width: 100, height: 30 })
+  });
+  const { BlockOverlays } = loadDesktopModule('src/renderer/overlay/block-overlays.ts', {}, {
+    document: { createElement: element },
+    ResizeObserver: class { observe() { } unobserve() { } }, clearTimeout() { },
+  });
+  const container = element();
+  const layer = new BlockOverlays(container);
+  const settings = {
+    mode: 'selected_window', showSource: false, sourceFontSize: 12, translatedFontSize: 12,
+    width: 400, autoHideMs: -1
+  };
+  const viewport = { bounds: { x: 0, y: 0, width: 1000, height: 800 }, workArea: { x: 0, y: 0, width: 1000, height: 800 } };
+  layer.configure(settings, viewport);
+  layer.show({
+    ...fixture('translation.result.non-japanese.json'), regionId: 'window-1',
+    captureBounds: viewport.bounds, combinedTranslatedText: 'Visible translation', blocks: [
+      { id: 'source-only', text: 'Source', translatedText: '', readingOrder: 0, bounds: { x: .1, y: .1, width: .2, height: .1 } },
+      { id: 'empty', text: ' \n ', translatedText: '\t\n', readingOrder: 1, bounds: { x: .1, y: .3, width: .2, height: .1 } },
+      { id: 'translated', text: '', translatedText: '\nVisible translation\n', readingOrder: 2, bounds: { x: .1, y: .5, width: .2, height: .1 } },
+    ]
+  });
+  assert.deepEqual(container.children.map(node => node.style.display), ['none', 'none', '']);
+  assert.equal(container.children[1].children[0].textContent, '');
+  assert.equal(container.children[1].children[1].textContent, '');
+  assert.equal(container.children[2].children[1].textContent, 'Visible translation');
+  layer.configure({ ...settings, showSource: true }, viewport);
+  assert.deepEqual(container.children.map(node => node.style.display), ['', 'none', '']);
+  layer.configure({ ...settings, translatedFontSize: 0 }, viewport);
+  assert.deepEqual(container.children.map(node => node.style.display), ['none', 'none', 'none']);
+});
+
+test('combined subtitle hides its background when source is off and translation is whitespace', () => {
+  const ts = require('typescript');
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/overlay/overlay.ts'), 'utf8');
+  const fn = source.slice(source.indexOf('function show('), source.indexOf('function showResult('));
+  const context = {
+    latestSourceText: '', latestTranslatedText: '',
+    sourceEl: {}, translatedEl: {}, box: { style: {}, classList: { remove() { }, add() { } } },
+    settings: { showSource: false, sourceFontSize: 12, translatedFontSize: 12 },
+    hideTimer: undefined, clearTimeout() { }, applyPlacement() { },
+  };
+  require('node:vm').runInNewContext(ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  context.show('Source', ' \n ', -1);
+  assert.equal(context.box.style.display, 'none');
+  assert.equal(context.translatedEl.textContent, '');
+  context.show('Source', '\nTranslation\n', -1);
+  assert.equal(context.box.style.display, '');
+  assert.equal(context.translatedEl.textContent, 'Translation');
+  context.settings.showSource = true;
+  context.show('Source', '', -1);
+  assert.equal(context.box.style.display, '');
+});
+
+for (const platform of ['darwin', 'win32']) {
+test(`cropped frame geometry projects into global logical coordinates on ${platform}`, async () => {
+  const scale = platform === 'win32' ? 2 : 1;
   const cropped = { getSize: () => ({ width: 400, height: 200 }), toJPEG: () => Buffer.from('crop') };
+  let cropBounds;
   const capture = captureWithStreams(class {
     async capture() {
-      return { getSize: () => ({ width: 2000, height: 1600 }), crop: () => cropped };
+      return { getSize: () => ({ width: 2000, height: 1600 }), crop: (bounds) => { cropBounds = bounds; return cropped; } };
     }
-    dispose() {}
-  });
+    dispose() { }
+  }, platform);
   const frames = await capture.capture([{
     regionId: 'region-1', display: { id: 2, scaleFactor: 2, bounds: { x: -1000, y: 0, width: 1000, height: 800 } },
-    region: { left: -800, top: 100, width: 200, height: 100 },
+    region: { left: -800 * scale, top: 100 * scale, width: 200 * scale, height: 100 * scale },
   }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(cropBounds)), { x: 400, y: 200, width: 400, height: 200 });
   assert.deepEqual(JSON.parse(JSON.stringify(frames[0].geometry.screenBoundsDip)), { x: -800, y: 100, width: 200, height: 100 });
   capture.stop();
 });
+}
 
 test('hover selection picks the frontmost window and handles negative monitor coordinates', () => {
-  const { windowAtPoint } = loadDesktopModule('src/main/window-picker.ts', { electron: {} });
+  const { windowAtPoint } = loadDesktopModule('src/main/window-picker.ts', {
+    electron: {}, './window-metadata': loadDesktopModule('src/main/window-metadata.ts', {}),
+  });
   const front = { id: 10, name: 'Front', bounds: { x: -900, y: -100, width: 400, height: 300 } };
   const back = { id: 20, name: 'Back', bounds: { x: -1000, y: -200, width: 900, height: 600 } };
   assert.equal(windowAtPoint([front, back], { x: -700, y: 0 }), front);
@@ -632,74 +738,149 @@ test('hover selection picks the frontmost window and handles negative monitor co
   assert.equal(windowAtPoint([front, back], { x: 100, y: 0 }), undefined);
 });
 
-test('hover picker validates IPC, uses main-process hit testing, and releases all resources on cancel', async () => {
-  const { EventEmitter } = require('node:events');
-  const handlers = new Map();
-  const pickers = [];
-  const helper = new EventEmitter();
-  helper.stdout = {};
-  helper.kill = () => { helper.killed = true; helper.emit('exit'); };
-  const lines = new EventEmitter();
-  lines.close = () => { lines.closed = true; };
-  let point = { x: -500, y: 50 };
-  let intervalCleared = false;
-  let selected;
-  class Picker extends EventEmitter {
-    constructor(options) {
-      super();
-      this.bounds = options;
-      this.webContents = new EventEmitter();
-      this.webContents.isLoadingMainFrame = () => false;
-      this.webContents.send = () => {};
-      pickers.push(this);
+for (const platform of ['darwin', 'win32']) {
+  test(`hover picker validates IPC, scales native bounds, and releases resources on ${platform}`, async () => {
+    const { EventEmitter } = require('node:events');
+    const handlers = new Map();
+    const pickers = [];
+    const helper = new EventEmitter();
+    helper.stderr = new EventEmitter();
+    helper.stdout = {};
+    helper.kill = () => { helper.killed = true; helper.emit('exit'); };
+    const lines = new EventEmitter();
+    lines.close = () => { lines.closed = true; };
+    let point = { x: -500, y: 50 };
+    let intervalCleared = false;
+    let selected;
+    class Picker extends EventEmitter {
+      constructor(options) {
+        super();
+        this.bounds = options;
+        this.webContents = new EventEmitter();
+        this.webContents.isLoadingMainFrame = () => false;
+        this.webContents.send = () => { };
+        pickers.push(this);
+      }
+      setAlwaysOnTop() { }
+      setVisibleOnAllWorkspaces() { }
+      async loadFile() { }
+      show() { }
+      focus() { }
+      getBounds() { return this.bounds; }
+      isDestroyed() { return !!this.destroyed; }
+      destroy() { this.destroyed = true; this.emit('closed'); }
     }
-    setAlwaysOnTop() {}
-    setVisibleOnAllWorkspaces() {}
-    async loadFile() {}
-    show() {}
-    focus() {}
-    getBounds() { return this.bounds; }
-    isDestroyed() { return !!this.destroyed; }
-    destroy() { this.destroyed = true; this.emit('closed'); }
-  }
-  const { HoverWindowPicker } = loadDesktopModule('src/main/window-picker.ts', {
-    'node:child_process': { spawn: (_binary, args) => {
-      assert.deepEqual(Array.from(args), [String(process.pid)]);
-      return helper;
-    } },
-    'node:readline': { createInterface: () => lines },
-    electron: {
-      BrowserWindow: Picker,
-      ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: (name) => handlers.delete(name) },
-      screen: { getCursorScreenPoint: () => point, getAllDisplays: () => [
-        { bounds: { x: -1000, y: 0, width: 1000, height: 800 } },
-        { bounds: { x: 0, y: 0, width: 1000, height: 800 } },
-      ] },
-    },
-  }, {
-    process: { platform: 'darwin', pid: process.pid },
-    setInterval: () => 123, clearInterval: (id) => { intervalCleared = id === 123; },
+    const { HoverWindowPicker } = loadDesktopModule('src/main/window-picker.ts', {
+      './window-metadata': loadDesktopModule('src/main/window-metadata.ts', {}, { process: { platform, pid: process.pid } }),
+      'node:child_process': {
+        spawn: (binary, args, options) => {
+          assert.equal(options.windowsHide, true);
+          if (platform === 'win32') {
+            assert.equal(binary, 'powershell.exe');
+            assert.ok(args.includes('-ExcludedProcessId'));
+            assert.equal(args.at(-1), String(process.pid));
+          } else assert.deepEqual(Array.from(args), [String(process.pid)]);
+          return helper;
+        }
+      },
+      'node:readline': { createInterface: () => lines },
+      electron: {
+        BrowserWindow: Picker,
+        ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: (name) => handlers.delete(name) },
+        screen: {
+          screenToDipRect: (_window, bounds) => Object.fromEntries(Object.entries(bounds).map(([key, value]) => [key, value / 1.25])),
+          getCursorScreenPoint: () => point, getAllDisplays: () => [
+            { bounds: { x: -1000, y: 0, width: 1000, height: 800 } },
+            { bounds: { x: 0, y: 0, width: 1000, height: 800 } },
+          ]
+        },
+      },
+    }, {
+      process: { platform, pid: process.pid },
+      setInterval: () => 123, clearInterval: (id) => { intervalCleared = id === 123; },
+    });
+    const picker = new HoverWindowPicker('/dist', async (id) => { selected = id; });
+    await picker.start();
+    const scale = platform === 'win32' ? 1.25 : 1;
+    lines.emit('line', JSON.stringify([{
+      id: 42, name: 'Book', bounds: {
+        x: -600 * scale, y: 20 * scale, width: 300 * scale, height: 500 * scale,
+      }
+    }]));
+    const event = { sender: pickers[0].webContents };
+    const state = handlers.get('window-picker:state')(event);
+    assert.equal(state.name, 'Book');
+    assert.deepEqual(JSON.parse(JSON.stringify(state.bounds)), { x: 400, y: 20, width: 300, height: 500 });
+    assert.throws(() => handlers.get('window-picker:state')({ sender: {} }), /not active/);
+    assert.equal(await handlers.get('window-picker:select')({ sender: {} }), false);
+    assert.equal(await handlers.get('window-picker:select')(event, 'arbitrary-source-id'), true);
+    assert.equal(selected, 42);
+    point = { x: 999, y: 799 };
+    assert.equal(await handlers.get('window-picker:select')(event), false);
+    handlers.get('window-picker:cancel')(event);
+    assert.equal(helper.killed, true);
+    assert.equal(lines.closed, true);
+    assert.equal(intervalCleared, true);
+    assert.equal(handlers.size, 0);
+    assert.ok(pickers.every((win) => win.destroyed));
+    picker.dispose(); // Idempotent, including after the helper's exit event.
   });
-  const picker = new HoverWindowPicker('/dist', async (id) => { selected = id; });
-  await picker.start();
-  lines.emit('line', JSON.stringify([{ id: 42, name: 'Book', bounds: { x: -600, y: 20, width: 300, height: 500 } }]));
-  const event = { sender: pickers[0].webContents };
-  const state = handlers.get('window-picker:state')(event);
-  assert.equal(state.name, 'Book');
-  assert.deepEqual(JSON.parse(JSON.stringify(state.bounds)), { x: 400, y: 20, width: 300, height: 500 });
-  assert.throws(() => handlers.get('window-picker:state')({ sender: {} }), /not active/);
-  assert.equal(await handlers.get('window-picker:select')({ sender: {} }), false);
-  assert.equal(await handlers.get('window-picker:select')(event, 'arbitrary-source-id'), true);
-  assert.equal(selected, 42);
-  point = { x: 999, y: 799 };
-  assert.equal(await handlers.get('window-picker:select')(event), false);
-  handlers.get('window-picker:cancel')(event);
-  assert.equal(helper.killed, true);
-  assert.equal(lines.closed, true);
-  assert.equal(intervalCleared, true);
-  assert.equal(handlers.size, 0);
-  assert.ok(pickers.every((win) => win.destroyed));
-  picker.dispose(); // Idempotent, including after the helper's exit event.
+}
+
+test('Windows window bounds use the same native window ID and convert physical pixels to DIP', async () => {
+  const { readWindowBounds } = loadDesktopModule('src/main/window-bounds.ts', {
+    'node:util': {
+      promisify: (fn) => (...args) => new Promise((resolve, reject) => {
+        fn(...args, (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+      })
+    },
+    './window-metadata': loadDesktopModule('src/main/window-metadata.ts', {}, { process: { platform: 'win32', pid: 123 } }),
+    electron: {
+      screen: {
+        screenToDipRect: (window, rect) => {
+          assert.equal(window, null);
+          return Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value / 1.25]));
+        }
+      }
+    },
+    'node:child_process': {
+      execFile(binary, args, options, callback) {
+        assert.equal(binary, 'powershell.exe');
+        assert.equal(args.at(-1), '-Once');
+        assert.equal(options.windowsHide, true);
+        callback(null, JSON.stringify([{ id: 42, bounds: { x: -750, y: 25, width: 375, height: 625 } }]), '');
+      }
+    },
+  }, { process: { platform: 'win32', pid: 123 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(await readWindowBounds('window:42:0'))), { x: -600, y: 20, width: 300, height: 500 });
+  assert.equal(await readWindowBounds('window:99:0'), undefined);
+});
+
+test('window picker startup failures dispose resources and report an error without rejecting', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main.ts'), 'utf8');
+  const start = source.indexOf('async function openRegionPickerWindows(');
+  const body = source.slice(start, source.indexOf('  areaPickerSettings = captureSettings;', start)) + '\n}';
+  const statuses = [];
+  let disposed = false;
+  const context = {
+    __dirname: '/dist', windowPicker: null,
+    closeRegionPickerWindows() { },
+    HoverWindowPicker: class {
+      async start() { throw new Error('Native helper unavailable'); }
+      dispose() { disposed = true; }
+    },
+    publishStreamStatus: (status) => statuses.push(status),
+    console: { error() { } },
+  };
+  const ts = require('typescript');
+  require('node:vm').runInNewContext(ts.transpileModule(body, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText, context);
+  await context.openRegionPickerWindows({ mode: 'selected_window' });
+  assert.equal(disposed, true);
+  assert.equal(context.windowPicker, null);
+  assert.equal(statuses[0].state, 'error');
+  assert.match(statuses[0].message, /Native helper unavailable/);
 });
 
 test('capture reuses one stream, samples fresh frames, and releases it on stop', async () => {
@@ -744,7 +925,7 @@ test('different selected windows on the same display use separate streams and wi
     async capture() {
       return { getSize: () => ({ width: 800, height: 600 }), toJPEG: () => Buffer.from(this.sourceId) };
     }
-    dispose() {}
+    dispose() { }
   });
   const display = { id: 2, bounds: { x: -1920, y: 0, width: 1920, height: 1080 }, scaleFactor: 2 };
   const frames = await capture.capture([
@@ -771,7 +952,7 @@ function screenStreamHarness(sources, failure, { snapshots = [], now = () => Dat
       this.webContents = {
         mainFrame: {}, session: captureSession,
         isDestroyed: () => destroyed,
-        setWindowOpenHandler() {}, on() {},
+        setWindowOpenHandler() { }, on() { },
         executeJavaScript: async (script) => {
           if (failure) return { ok: false, ...failure };
           if (script.includes('.start(')) {
@@ -787,19 +968,21 @@ function screenStreamHarness(sources, failure, { snapshots = [], now = () => Dat
       };
     }
     isDestroyed() { return destroyed; }
-    async loadFile() {}
+    async loadFile() { }
     destroy() { destroyed = true; }
   }
   const { ScreenStream } = loadDesktopModule('src/main/screen-stream.ts', {
     electron: {
       BrowserWindow: Worker,
       session: { fromPartition: () => captureSession },
-      desktopCapturer: { async getSources(options) {
-        assert.deepEqual({ ...options.thumbnailSize }, { width: 0, height: 0 });
-        assert.deepEqual([...options.types], windowSourceId ? ['window'] : ['screen']);
-        enumerationCount += 1;
-        return sources;
-      } },
+      desktopCapturer: {
+        async getSources(options) {
+          assert.deepEqual({ ...options.thumbnailSize }, { width: 0, height: 0 });
+          assert.deepEqual([...options.types], windowSourceId ? ['window'] : ['screen']);
+          enumerationCount += 1;
+          return sources;
+        }
+      },
       nativeImage: { createFromDataURL: () => ({ isEmpty: () => false }) },
     },
   }, { Date: { now } });
@@ -879,13 +1062,13 @@ test('screen stream reports a prolonged frame gap instead of waiting forever', a
 });
 
 test('capture worker skips muted/not-ready video but rejects an ended track', async () => {
-  const window = { addEventListener() {} };
-  const track = { readyState: 'live', muted: true, stop() {} };
-  const video = { readyState: 0, videoWidth: 0, videoHeight: 0, async play() {} };
-  const canvas = { getContext: () => ({ drawImage() {} }), toDataURL: () => 'data:image/png;base64,frame' };
+  const window = { addEventListener() { } };
+  const track = { readyState: 'live', muted: true, stop() { } };
+  const video = { readyState: 0, videoWidth: 0, videoHeight: 0, async play() { } };
+  const canvas = { getContext: () => ({ drawImage() { } }), toDataURL: () => 'data:image/png;base64,frame' };
   loadDesktopModule('src/renderer/capture/capture.ts', {}, {
     window, setTimeout, clearTimeout,
-    document: { body: { append() {} }, createElement: (tag) => tag === 'video' ? video : canvas },
+    document: { body: { append() { } }, createElement: (tag) => tag === 'video' ? video : canvas },
     navigator: { mediaDevices: { async getDisplayMedia() { return { getVideoTracks: () => [track], getTracks: () => [track] }; } } },
   });
   await window.screenCapture.start({ width: 1920, height: 1080 });

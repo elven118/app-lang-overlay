@@ -3,6 +3,7 @@ import { createInterface, type Interface } from 'node:readline';
 import path from 'node:path';
 import { BrowserWindow, ipcMain, screen, type Rectangle, type WebContents } from 'electron';
 import type { WindowHover } from '../shared/types';
+import { windowMetadataCommand } from './window-metadata';
 
 export interface NativeWindow {
   id: number;
@@ -10,7 +11,7 @@ export interface NativeWindow {
   bounds: Rectangle;
 }
 
-// Core Graphics returns front-to-back ordering in global, top-left desktop points.
+// Both native helpers return windows in front-to-back order.
 export function windowAtPoint(windows: NativeWindow[], point: { x: number; y: number }): NativeWindow | undefined {
   return windows.find(({ bounds: b }) => point.x >= b.x && point.y >= b.y &&
     point.x < b.x + b.width && point.y < b.y + b.height);
@@ -29,7 +30,7 @@ export class HoverWindowPicker {
   constructor(private readonly dist: string, private readonly select: (windowId: number) => Promise<void>) {}
 
   async start(): Promise<void> {
-    if (process.platform !== 'darwin') throw new Error('Hover window selection currently supports macOS only.');
+    const command = windowMetadataCommand(this.dist);
     ipcMain.handle('window-picker:state', (event) => {
       if (!this.owns(event.sender)) throw new Error('Window picker is not active');
       return this.state(event.sender);
@@ -54,13 +55,23 @@ export class HoverWindowPicker {
       if (this.owns(event.sender)) this.cancel();
     });
     try {
-      this.helper = spawn(path.join(this.dist, 'native/window-picker'), [String(process.pid)], { stdio: 'pipe' });
+      this.helper = spawn(command.binary, command.args, { stdio: 'pipe', windowsHide: true });
+      // Drain diagnostics so an error cannot block the helper's pipe.
+      this.helper.stderr.on('data', () => {});
       this.lines = createInterface({ input: this.helper.stdout });
       this.lines.on('line', (line) => {
         try {
-          this.nativeWindows = JSON.parse(line) as NativeWindow[];
+          const windows = JSON.parse(line) as NativeWindow[];
+          if (!Array.isArray(windows)) throw new Error('Expected window list');
+          this.nativeWindows = windows;
+          if (process.platform === 'win32') this.nativeWindows = this.nativeWindows.map((win) => ({
+            ...win, bounds: screen.screenToDipRect(null, win.bounds),
+          }));
           this.error = '';
-        } catch { this.error = 'Could not read window positions. Cancel and try again.'; }
+        } catch {
+          this.nativeWindows = [];
+          this.error = 'Could not read window positions. Cancel and try again.';
+        }
       });
       this.helper.on('error', (error) => {
         this.nativeWindows = [];

@@ -53,10 +53,10 @@ export class BlockOverlays {
       card.dataset.regionId = result.regionId;
       const source = document.createElement('div');
       source.className = 'line block-source';
-      source.textContent = block.text;
+      source.textContent = block.text.trim();
       const translation = document.createElement('div');
       translation.className = 'line block-translation';
-      translation.textContent = block.translatedText;
+      translation.textContent = block.translatedText.trim();
       card.append(source, translation);
       this.container.append(card);
       this.observer.observe(card);
@@ -95,6 +95,11 @@ export class BlockOverlays {
     const { bounds, workArea } = this.viewport;
     for (const { result, cards, nodes } of this.regions.values()) {
       nodes.forEach((node, index) => {
+        const card = cards[index];
+        const visibleText = (this.settings!.showSource && this.settings!.sourceFontSize !== 0 && card.text.trim())
+          || (this.settings!.translatedFontSize !== 0 && card.translatedText.trim());
+        node.style.display = visibleText ? '' : 'none';
+        if (!visibleText) return;
         if (!result.captureBounds) { node.style.visibility = 'hidden'; return; }
         const anchor = projectBlock(cards[index].bounds, result.captureBounds);
         const cx = anchor.x + anchor.width / 2, cy = anchor.y + anchor.height / 2;

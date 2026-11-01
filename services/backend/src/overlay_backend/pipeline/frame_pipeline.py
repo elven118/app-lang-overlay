@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
 from collections import OrderedDict
 
@@ -95,7 +96,12 @@ class FramePipeline:
         if dedupe_key == region.last_dedupe_key:
             return None
 
-        cache_key = f"{self.translator.revision}|{dedupe_key}"
+        # Cached dictionaries are keyed by OCR IDs, which can change between
+        # regions/frames even when the combined source text is identical.
+        block_key = hashlib.sha256(json.dumps(
+            [(item.id, item.text) for item in ordered], ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        cache_key = f"{self.translator.revision}|{dedupe_key}|{block_key}"
         translated_by_id = self.cache.get(cache_key)
         translation_started = time.perf_counter()
         if translated_by_id is None:

@@ -763,8 +763,11 @@ async function openRegionPickerWindows(captureSettings = getOverlaySettings(prof
     picker.onCancel = () => { if (windowPicker === picker) closeRegionPickerWindows(); };
     try { await picker.start(); }
     catch (error) {
+      picker.dispose();
       if (windowPicker === picker) windowPicker = null;
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[window-picker]', message);
+      publishStreamStatus({ state: 'error', message: `Window selection failed: ${message}` });
     }
     return;
   }

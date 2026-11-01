@@ -10,9 +10,10 @@ const repoRoot = path.resolve(__dirname, '../../..');
 const backendRoot = path.join(repoRoot, 'services', 'backend');
 const backendSource = path.join(backendRoot, 'src');
 const desktopRoot = path.resolve(__dirname, '..');
-const venvPython = process.platform === 'win32' 
-  ? path.join(repoRoot, '.venv', 'Scripts', 'python.exe')
-  : path.join(repoRoot, '.venv', 'bin', 'python');
+const venvPython = ['.venv', 'venv'].map((directory) => process.platform === 'win32'
+  ? path.join(repoRoot, directory, 'Scripts', 'python.exe')
+  : path.join(repoRoot, directory, 'bin', 'python'))
+  .find((candidate) => fs.existsSync(candidate));
 
 
 function loadEnvironment(filePath) {
@@ -39,7 +40,7 @@ const backendArgs = [
   '-m', 'overlay_backend'
 ];
 
-const backendPython = fs.existsSync(venvPython) 
+const backendPython = venvPython
   ? venvPython 
   : (process.platform === 'win32' ? 'python' : 'python3');
 
@@ -67,7 +68,8 @@ const electron = spawn(electronExecutable, ['.'], {
     ...(defaultProfile ? { OVERLAY_DEFAULT_PROFILE: defaultProfile } : {}),
     OVERLAY_BACKEND_URL: backendUrl,
     OVERLAY_BACKEND_TOKEN: backendToken,
-  }
+  },
+  shell: true
 });
 
 backend.on('exit', (code, signal) => {

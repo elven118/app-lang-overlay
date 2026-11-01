@@ -17,6 +17,9 @@ html, body {
 }
 
 #subtitle-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--line-gap);
   background: var(--bg);
   padding: 10px 14px;
   border-radius: 12px;
@@ -38,7 +41,7 @@ html, body {
 #subtitle-box.visible { opacity: 1; }
 
 .line {
-  line-height: 1.2;
+  line-height: normal;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -52,25 +55,28 @@ html, body {
 #translated { 
   font-size: var(--translated-font-size); 
   color: var(--translate-color); 
-  margin-top: var(--line-gap); 
+  display: var(--show-translation, block);
 }
 
 #block-overlays { position: fixed; inset: 0; pointer-events: none; }
 .block-overlay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--line-gap);
   position: absolute;
   width: max-content;
   height: auto;
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 10px;
   border-radius: 10px;
   background: var(--bg);
-  backdrop-filter: blur(2px);
   overflow: auto;
 }
 .block-overlay[hidden] { display: none; }
 .block-overlay .line { text-align: left; writing-mode: horizontal-tb; }
 .block-source { display: var(--show-source); font-size: var(--source-font-size); color: var(--text-color); }
-.block-translation { font-size: var(--translated-font-size); color: var(--translate-color); margin-top: var(--line-gap); }
+.block-translation { display: var(--show-translation, block); font-size: var(--translated-font-size); color: var(--translate-color); }
+#source:empty, #translated:empty, .block-source:empty, .block-translation:empty { display: none; }
 
 #selection-area {
   position: fixed;
